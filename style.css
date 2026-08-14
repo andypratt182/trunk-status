@@ -1,0 +1,356 @@
+/* ---------------------------------------------------------------------
+   Design tokens
+   Palette pulled from real UK road signage: near-black gantry background,
+   amber matrix-sign text, motorway blue / primary-route green junction
+   roundels, red for live incidents.
+   --------------------------------------------------------------------- */
+:root {
+  --bg: #101317;
+  --panel: #191d22;
+  --panel-border: #262c33;
+  --text: #ECEAE2;
+  --text-muted: #8B93A0;
+
+  --amber: #FFB81C;
+  --amber-dim: #7A5E17;
+  --red: #E4002B;
+  --red-dim: #5c1420;
+  --grey-status: #6E7681;
+  --grey-status-dim: #2b2f34;
+
+  --blue-motorway: #0057A8;
+  --green-primary: #00703C;
+
+  --font-display: "Oswald", "Arial Narrow", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  --radius: 6px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fade-in { animation: fadeIn 0.4s ease-out both; }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+a { color: var(--amber); text-decoration: none; }
+a:hover { text-decoration: underline; }
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 0 20px 64px;
+}
+
+/* --- Header bar: matrix-sign strip --- */
+.site-header {
+  border-bottom: 3px solid var(--amber);
+  background: linear-gradient(180deg, #14181d 0%, #101317 100%);
+  padding: 22px 20px 18px;
+  margin-bottom: 8px;
+}
+.site-header .wrap { padding: 0; display: flex; align-items: baseline;
+  justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.site-title {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  font-size: 1.6rem;
+  color: var(--amber);
+  margin: 0;
+}
+.site-title a { color: inherit; }
+.feed-meta {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+/* --- Route cards on index --- */
+.route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+  margin-top: 24px;
+}
+.route-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+  padding: 18px 20px 16px;
+}
+.route-card h2 {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 1.15rem;
+  margin: 0 0 10px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 4px;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.78rem;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.badge-motorway { background: var(--blue-motorway); }
+.badge-primary { background: var(--green-primary); }
+
+.junction-range {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-bottom: 14px;
+}
+
+.direction-list { list-style: none; margin: 0; padding: 0; }
+.direction-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--panel-border);
+}
+.direction-row:first-child { border-top: none; }
+.direction-row a { color: var(--text); font-weight: 600; }
+.direction-row a:hover { color: var(--amber); }
+.count-pill {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  padding-top: 2px;
+}
+.count-pill .active-flag {
+  color: var(--red);
+  font-weight: 700;
+}
+.badge-sm {
+  min-width: 24px;
+  height: 18px;
+  font-size: 0.68rem;
+  padding: 0 5px;
+  margin-right: 4px;
+}
+.leg-chain-mini {
+  margin-top: 5px;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.9;
+}
+.leg-chain-mini .mini-junc { margin-right: 2px; }
+.leg-chain-mini .mini-arrow { color: var(--amber); }
+
+/* --- Journey strip signature element (route page): the whole chain of
+   legs for a direction, e.g. [M6 J45<->J26] -> [M58 full] -> [M57 J6<->J4] */
+.journey-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 20px 0 32px;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+}
+.journey-leg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.journey-arrow {
+  color: var(--amber);
+  font-size: 1.2rem;
+  align-self: center;
+  margin: 0 2px;
+}
+.journey-node-full {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 20px;
+}
+
+.junction-strip {
+  display: flex;
+  align-items: center;
+  width: 130px;
+}
+.journey-node {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.74rem;
+  color: #fff;
+  border: 2px solid rgba(255,255,255,0.15);
+}
+.junction-line {
+  flex: 1 1 auto;
+  height: 3px;
+  margin: 0 3px;
+  background-image: repeating-linear-gradient(
+    90deg, var(--amber) 0 7px, transparent 7px 13px
+  );
+}
+
+/* --- Leg sections within a route page --- */
+.leg-section { margin-bottom: 30px; }
+.leg-section-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+  font-size: 1rem;
+  margin: 0 0 12px;
+  color: var(--text);
+}
+.leg-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+/* --- Route page header --- */
+.route-header {
+  margin-top: 18px;
+}
+.route-header .breadcrumb {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.route-header h1 {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-size: 1.9rem;
+  margin: 4px 0 2px;
+}
+.route-header .direction-label {
+  color: var(--amber);
+}
+
+/* --- Table --- */
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius);
+}
+table.closures {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  min-width: 760px;
+}
+table.closures th {
+  text-align: left;
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: #14181d;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  position: sticky;
+  top: 0;
+}
+table.closures td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-border);
+  vertical-align: top;
+}
+table.closures tbody tr:hover { background: #1d2228; }
+table.closures tbody tr:last-child td { border-bottom: none; }
+
+.status-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+.status-active .status-dot { background: var(--red); box-shadow: 0 0 6px var(--red); }
+.status-active { color: var(--red); font-weight: 600; }
+.status-planned .status-dot { background: var(--amber); }
+.status-planned { color: var(--amber); }
+.status-suspended .status-dot { background: var(--grey-status); }
+.status-suspended { color: var(--grey-status); }
+
+.lanes-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.location-cell { max-width: 320px; }
+.location-cell .comment {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  border: 1px dashed var(--panel-border);
+  border-radius: var(--radius);
+}
+
+.back-link { display: inline-block; margin-top: 26px; font-size: 0.85rem; }
+
+footer.site-footer {
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--panel-border);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+@media (max-width: 640px) {
+  .site-header .wrap { flex-direction: column; align-items: flex-start; }
+  .feed-meta { text-align: left; }
+}
