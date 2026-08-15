@@ -18,7 +18,21 @@
 
 site:
   title: "Route Closures"
-  data_url: "https://raw.githubusercontent.com/andypratt182/Road-data/refs/heads/main/data/road_data.json"
+
+  # --- Live National Highways API (default) ---
+  # Requires a free API key from https://developer.data.nationalhighways.co.uk
+  # Set it as a GitHub Actions secret named NATIONAL_HIGHWAYS_API_KEY (see README),
+  # or export it locally before running build.py.
+  source: "national_highways_api"
+  api_base_url: "https://api.data.nationalhighways.co.uk"
+  closure_type: null          # "planned", "unplanned", or null for both
+  lookahead_days: 60          # how far ahead to fetch closures for
+
+  # --- Alternative: a pre-flattened JSON mirror (no API key needed) ---
+  # Uncomment these two lines and comment out the "source:" line above
+  # (and the three lines below it) to use this instead.
+  # source: "flat_json"
+  # data_url: "https://raw.githubusercontent.com/andypratt182/Road-data/refs/heads/main/data/road_data.json"
 
 routes:
   - id: axis
