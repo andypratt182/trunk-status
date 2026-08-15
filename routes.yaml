@@ -1,0 +1,96 @@
+# ---------------------------------------------------------------------------
+# Route definitions
+# ---------------------------------------------------------------------------
+# Each route has a northbound and a southbound direction. Each direction is
+# a *chain of legs* -- one or more road sections travelled in order -- so
+# you can model a real driving route that crosses several motorways.
+#
+# Per leg:
+#   road_name        must match the closure's road (e.g. "M6", "A14")
+#   junction_from /
+#   junction_to      junction range for this leg. Omit both (or set to null)
+#                    to mean "entire road" -- no junction filtering.
+#   data_direction   the literal direction value used in the feed for that
+#                    road: northBound / southBound / eastBound / westBound.
+#                    Not every road is signed north/south -- e.g. the M58
+#                    and M62 here run east/west. Check the feed if unsure.
+# ---------------------------------------------------------------------------
+
+site:
+  title: "Route Closures"
+
+  # --- Live National Highways API (default) ---
+  # Requires a free API key from https://developer.data.nationalhighways.co.uk
+  # Set it as a GitHub Actions secret named NATIONAL_HIGHWAYS_API_KEY (see README),
+  # or export it locally before running build.py.
+  source: "national_highways_api"
+  api_base_url: "https://api.data.nationalhighways.co.uk"
+  closure_type: null          # "planned", "unplanned", or null for both
+  lookahead_days: 29          # how far ahead to fetch closures for (API max: 30)
+
+  # --- Alternative: a pre-flattened JSON mirror (no API key needed) ---
+  # Uncomment these two lines and comment out the "source:" line above
+  # (and the three lines below it) to use this instead.
+  # source: "flat_json"
+  # data_url: "https://raw.githubusercontent.com/andypratt182/Road-data/refs/heads/main/data/road_data.json"
+
+routes:
+  - id: axis
+    name: "Axis"
+    directions:
+      southbound:
+        label: "Southbound"
+        legs:
+          - road_name: "M6"
+            junction_from: 45
+            junction_to: 26
+            data_direction: "southBound"
+          - road_name: "M58"
+            junction_from: null
+            junction_to: null
+            data_direction: "westBound"
+          - road_name: "M57"
+            junction_from: 6
+            junction_to: 4
+            data_direction: "southBound"
+      northbound:
+        label: "Northbound"
+        legs:
+          - road_name: "M57"
+            junction_from: 4
+            junction_to: 6
+            data_direction: "northBound"
+          - road_name: "M58"
+            junction_from: null
+            junction_to: null
+            data_direction: "eastBound"
+          - road_name: "M6"
+            junction_from: 26
+            junction_to: 45
+            data_direction: "northBound"
+
+  - id: omega
+    name: "Omega"
+    directions:
+      southbound:
+        label: "Southbound"
+        legs:
+          - road_name: "M6"
+            junction_from: 45
+            junction_to: 21
+            data_direction: "southBound"
+          - road_name: "M62"
+            junction_from: 10
+            junction_to: 8
+            data_direction: "westBound"
+      northbound:
+        label: "Northbound"
+        legs:
+          - road_name: "M62"
+            junction_from: 8
+            junction_to: 10
+            data_direction: "eastBound"
+          - road_name: "M6"
+            junction_from: 21
+            junction_to: 45
+            data_direction: "northBound"
