@@ -48,9 +48,15 @@ OUTPUT_DIR = ROOT / "_site"
 
 NATIONAL_HIGHWAYS_DEFAULT_BASE_URL = "https://api.data.nationalhighways.co.uk"
 
-# Junction numbers show up in free text like "between J35 and J36" or
-# "M62 eastbound Jct 36 to Jct 37" -- cover both "J35" and "Jct 35" styles.
-JUNCTION_RE = re.compile(r'J(?:ct)?\.?\s*(\d+)', re.IGNORECASE)
+# Junction numbers show up in free text like "between J35 and J36", "M62
+# eastbound Jct 36 to Jct 37", or spelled out as "Junction 40" / "Junctions
+# 40 to 39" (seen in the National Highways advance-notice XLSX) -- the
+# second number in a spelled-out range often has no "J"/"Junction" prefix
+# of its own, so an optional trailing "to/and/-<number>" is captured too.
+JUNCTION_RE = re.compile(
+    r'\b(?:Junction|Junc|Jct|J)s?\.?\s*(\d+)(?:\s*(?:to|and|-|\u2013)\s*(\d+))?',
+    re.IGNORECASE,
+)
 
 # road_name is sometimes blank; fall back to parsing it off the front of
 # the free-text comment, e.g. "M62 eastbound Jct 36...".
@@ -467,11 +473,26 @@ def resolve_road_name(closure: dict) -> str:
 
 
 def extract_junctions(closure: dict) -> list[int]:
-    text = " ".join(filter(None, [
-        closure.get("location_description", ""),
-        closure.get("comment", ""),
-    ]))
-    return [int(n) for n in JUNCTION_RE.findall(text)]
+    """
+    Junction numbers for route matching/sorting come from the structured
+    location text only, not the free-text comment -- the comment field can
+    contain diversion route instructions (e.g. "diversion via A50, rejoin
+    at J24") that mention junctions with no relation to where the closure
+    actually is, which would otherwise contaminate matching and sort order.
+    Only fall back to the comment when location text has no junction info.
+    """
+    def find_all(text: str) -> list[int]:
+        nums = []
+        for m in JUNCTION_RE.finditer(text):
+            nums.append(int(m.group(1)))
+            if m.group(2):
+                nums.append(int(m.group(2)))
+        return nums
+
+    junctions = find_all(closure.get("location_description") or "")
+    if junctions:
+        return junctions
+    return find_all(closure.get("comment") or "")
 
 
 def closure_matches_leg(closure: dict, road_name: str, data_direction: str,
