@@ -588,13 +588,26 @@ def scotland_parse_entry_text(block_text: str, detail_url: str, heading: str) ->
         comment_parts.append(f"Diversion: {diversion}")
     comment = " | ".join(comment_parts)
 
+    # The structured Location field on this site often uses cross-road or
+    # landmark names for the M74 rather than junction numbers (e.g. "M74
+    # (A72 Exit Jct to Entry M74 On Slip)"), while the Traffic Management
+    # text frequently states the actual junction extent (e.g. "Lane
+    # closure between Junction 8 and Junction 9"). Folding it into the
+    # displayed location surfaces those junction numbers to readers and
+    # to junction-range matching, which reads location_description first.
+    # Diversion text is deliberately kept OUT of this -- a detour route
+    # mentions junctions along the diversion, not the closure's own
+    # location, and folding it in would contaminate matching the same way
+    # the National Highways advance-notice XLSX's diversion text did.
+    display_location = f"{location} \u2014 {tm}" if tm else location
+
     sid_match = re.search(r'[?&]sid=([^&]+)', detail_url)
     record_id = f"scotland-{sid_match.group(1)}" if sid_match else f"scotland-{hash(block_text)}"
 
     return {
         "record_id": record_id,
         "heading": heading,
-        "location_description": location,
+        "location_description": display_location,
         "direction": scotland_extract_direction(location),
         "comment": comment,
         "start_datetime": parse_scottish_datetime(start_text),
