@@ -2,9 +2,8 @@ name: Build and deploy route closures site
 
 on:
   schedule:
-    # Every 6 hours. Edit the cron expression to change frequency
-    # (this is UTC time). https://crontab.guru is handy for this.
-    - cron: "0 */6 * * *"
+    # Every 10 minutes (UTC). https://crontab.guru is handy for changing this.
+    - cron: "*/10 * * * *"
   workflow_dispatch: {}   # lets you trigger a manual rebuild from the Actions tab
   push:
     branches: [main]      # rebuild whenever routes.yaml or templates change
