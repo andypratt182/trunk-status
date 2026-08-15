@@ -505,6 +505,23 @@ def road_badge_class(road_name: str) -> str:
     return "badge-primary"
 
 
+def leg_direction_sort_key(closure: dict, j_from: int | None, j_to: int | None):
+    """
+    Order closures along the direction of travel for a leg -- e.g. for
+    M6 J45 -> J26 southbound, a closure near J45 should come before one
+    near J30. Falls back to start time for closures with no junction
+    number in their text (which also covers "entire road" legs, where
+    junction ordering isn't meaningful).
+    """
+    if j_from is not None and j_to is not None:
+        junctions = extract_junctions(closure)
+        if junctions:
+            avg = sum(junctions) / len(junctions)
+            # travelling from a higher to a lower junction number -> reverse
+            return (0, -avg if j_from > j_to else avg)
+    return (1, closure.get("start_datetime") or "")
+
+
 def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
                   j_from: int | None, j_to: int | None) -> list[dict]:
     matches = [
@@ -521,7 +538,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         if key not in deduped:
             deduped[key] = c
     matches = list(deduped.values())
-    matches.sort(key=lambda c: c.get("start_datetime") or "")
+    matches.sort(key=lambda c: leg_direction_sort_key(c, j_from, j_to))
 
     rows = []
     for c in matches:
