@@ -64,6 +64,15 @@ the same field names build.py expects (`road_name`, `direction`,
 `location_description`, etc.). Swap the `site:` block in `routes.yaml` to
 use this instead -- see the comments in that file.
 
+## Day filter
+
+Each route page has a row of filter buttons — **All**, **Today**,
+**Tomorrow**, then named weekdays out to 7 days (matching the
+advance-notice report's own window; the API can have data further out,
+which is still visible under "All"). This runs entirely client-side
+against the already-rendered table, so switching days is instant and
+needs no rebuild — the JS lives in `static/day-filter.js`.
+
 ## Additional source: advance-notice full closures (XLSX)
 
 `routes.yaml` also layers in National Highways' public "7-day closure
