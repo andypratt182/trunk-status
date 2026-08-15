@@ -254,6 +254,35 @@ button:focus-visible {
   color: var(--text-muted);
 }
 
+/* --- Day filter bar --- */
+.day-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 24px;
+}
+.day-filter-btn {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 20px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.day-filter-btn:hover {
+  border-color: var(--amber-dim);
+  color: var(--text);
+}
+.day-filter-btn.is-active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #14181d;
+  font-weight: 600;
+}
+
 /* --- Route page header --- */
 .route-header {
   margin-top: 18px;
