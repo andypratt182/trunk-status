@@ -308,7 +308,7 @@ def load_closures(site_cfg: dict) -> tuple[list[dict], str]:
 # ---------------------------------------------------------------------
 
 XLSX_HEADER_SYNONYMS: dict[str, set[str]] = {
-    "road_name": {"road", "roadname", "route"},
+    "road_name": {"road", "roadname", "route", "roadnumber"},
     "direction": {"direction"},
     "location_description": {
         "location", "locationdescription", "section", "extent",
@@ -316,18 +316,23 @@ XLSX_HEADER_SYNONYMS: dict[str, set[str]] = {
     },
     "start_datetime": {
         "startdate", "start", "closurestartdate", "datefrom",
-        "closurestart", "startdatetime",
+        "closurestart", "startdatetime", "scheduledstarttime", "scheduledstart",
     },
     "end_datetime": {
         "enddate", "end", "closureenddate", "dateto",
-        "closureend", "enddatetime",
+        "closureend", "enddatetime", "scheduledendtime", "scheduledend",
     },
     "comment": {
         "description", "comment", "comments", "details",
         "workdescription", "scheme", "schemedescription", "reason",
+        "closuredetailsincludingdiversions", "closuredetails",
     },
     "validity_status": {"status", "closurestatus"},
 }
+
+# How many leading rows to scan (per sheet) looking for the header row --
+# some sheets have a title row above the real column headers.
+MAX_HEADER_SCAN_ROWS = 6
 
 
 def normalize_header(value) -> str:
@@ -340,6 +345,24 @@ def to_iso_datetime(value) -> str:
     if isinstance(value, (datetime, date_cls)):
         return value.isoformat()
     return str(value).strip()
+
+
+def find_header_row(rows: list[tuple]) -> tuple[int, dict[str, int]] | tuple[None, None]:
+    """Scan the first few rows of a sheet for the one that looks like a
+    header row (i.e. has a cell matching a known road-name synonym), since
+    the real header row isn't always row 1 -- some sheets have a title row
+    above it. Returns (row_index, col_map) or (None, None) if not found."""
+    for row_idx, row in enumerate(rows[:MAX_HEADER_SCAN_ROWS]):
+        headers = [normalize_header(h) for h in row]
+        col_map: dict[str, int] = {}
+        for field, synonyms in XLSX_HEADER_SYNONYMS.items():
+            for idx, h in enumerate(headers):
+                if h in synonyms:
+                    col_map[field] = idx
+                    break
+        if "road_name" in col_map:
+            return row_idx, col_map
+    return None, None
 
 
 def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
@@ -370,33 +393,26 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows_iter = ws.iter_rows(values_only=True)
-        try:
-            header_row = next(rows_iter)
-        except StopIteration:
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
             continue  # empty sheet
 
-        headers = [normalize_header(h) for h in header_row]
-        print(f"  sheet '{sheet_name}' headers: {header_row}")
-
-        col_map: dict[str, int] = {}
-        for field, synonyms in XLSX_HEADER_SYNONYMS.items():
-            for idx, h in enumerate(headers):
-                if h in synonyms:
-                    col_map[field] = idx
-                    break
-
-        if "road_name" not in col_map:
-            print(f"  sheet '{sheet_name}': no recognizable 'road' column -- "
-                  f"skipping this sheet (probably not a data sheet).")
+        header_idx, col_map = find_header_row(rows)
+        if header_idx is None:
+            preview = rows[0] if rows else ()
+            print(f"  sheet '{sheet_name}': no recognizable 'road' column in the "
+                  f"first {MAX_HEADER_SCAN_ROWS} rows -- skipping this sheet "
+                  f"(first row: {preview}).")
             continue
+
+        print(f"  sheet '{sheet_name}' headers (row {header_idx + 1}): {rows[header_idx]}")
 
         def get(row, field):
             idx = col_map.get(field)
             return row[idx] if idx is not None and idx < len(row) else None
 
         sheet_rows = 0
-        for row in rows_iter:
+        for row in rows[header_idx + 1:]:
             road_name = get(row, "road_name")
             if not road_name:
                 continue
