@@ -11,9 +11,18 @@
 #   junction_to      junction range for this leg. Omit both (or set to null)
 #                    to mean "entire road" -- no junction filtering.
 #   data_direction   the literal direction value used in the feed for that
-#                    road: northBound / southBound / eastBound / westBound.
-#                    Not every road is signed north/south -- e.g. the M58
-#                    and M62 here run east/west. Check the feed if unsure.
+#                    road: northBound / southBound / eastBound / westBound
+#                    (National Highways' camelCase) or Northbound /
+#                    Southbound (Traffic Scotland's style) -- matching is
+#                    case-insensitive so either casing works. Not every
+#                    road is signed north/south -- e.g. the M58 and M62
+#                    here run east/west. Check the feed if unsure.
+#
+# M74 note: the M74 becomes "A74(M)" on its southern stretch near the
+# Scotland/England border. build.py treats these as the same road via
+# SCOTLAND_ROAD_ALIASES and always normalizes to "M74", so legs below
+# just use "M74" regardless of which name a given closure was published
+# under.
 # ---------------------------------------------------------------------------
 
 site:
@@ -34,25 +43,32 @@ site:
   # source: "flat_json"
   # data_url: "https://raw.githubusercontent.com/andypratt182/Road-data/refs/heads/main/data/road_data.json"
 
-  # --- Additional source: National Highways advance-notice XLSX ---
-  # This is the public "7-day closure report" -- it lists FULL closures
-  # (whole carriageway shut, typically 8pm-6am) up to 7 days ahead, and can
-  # show closures *before* they appear via the API (the API only reports
-  # closures once physical signs/signals are actively set on the road,
-  # which often happens closer to the closure time than this report is
-  # published). Rows from this source are tagged "Advance notice (full
-  # closure)" in the site's Source column so it's clear which data they
-  # came from. This is layered on top of whichever primary "source:" above
-  # is active -- remove this block entirely to turn it off.
-  #
-  # NOTE: this file's real column layout hasn't been verified (see build.py
-  # comments) -- check the first live build's log output for a line like
-  # "sheet '...' headers: (...)" to confirm it parsed correctly, and share
-  # that output if it comes back with 0 rows so the column-matching can be
-  # corrected.
+  # --- Additional sources, layered on top of the primary source above ---
   additional_sources:
+    # National Highways advance-notice XLSX: the public "7 day closure
+    # report" -- FULL closures (whole carriageway, typically 8pm-6am) up
+    # to 7 days ahead, published before the API would show them (the API
+    # only reports closures once VSS signs are actively set). Rows show
+    # as "Advance notice (full closure)" in the site's Source column.
     - type: "xlsx_advance_notice"
       url: "https://nationalhighways.co.uk/media/1dgh4t0q/7-day-closure-report.xlsx"
+
+    # Traffic Scotland: scraped (no self-service API available -- see
+    # build.py's comments above fetch_from_traffic_scotland for why).
+    # Covers Scotland's trunk road network; road_name is the ONLY filter
+    # applied at fetch time -- junction range filtering happens per-leg
+    # below, same as every other source. Rows show as "Traffic Scotland
+    # (scraped)" in the Source column.
+    #
+    # UNVERIFIED AGAINST LIVE MARKUP: the HTML-parsing step (finding each
+    # entry's container) was tested against a plausible structure, not
+    # the real site, since no network access was available while writing
+    # it. If the first live run logs "parsed 0 total entries" for either
+    # Traffic Scotland page, that's the signal something needs
+    # adjusting -- see build.py's comments for how to debug it. A
+    # failure here is a warning, not a build-breaking error either way.
+    - type: "traffic_scotland_scraper"
+      road_name: "M74"
 
 routes:
   - id: axis
@@ -61,6 +77,10 @@ routes:
       southbound:
         label: "Southbound"
         legs:
+          - road_name: "M74"
+            junction_from: 8
+            junction_to: 22
+            data_direction: "Southbound"
           - road_name: "M6"
             junction_from: 45
             junction_to: 26
@@ -88,6 +108,10 @@ routes:
             junction_from: 26
             junction_to: 45
             data_direction: "northBound"
+          - road_name: "M74"
+            junction_from: 22
+            junction_to: 8
+            data_direction: "Northbound"
 
   - id: omega
     name: "Omega"
@@ -95,6 +119,10 @@ routes:
       southbound:
         label: "Southbound"
         legs:
+          - road_name: "M74"
+            junction_from: 8
+            junction_to: 22
+            data_direction: "Southbound"
           - road_name: "M6"
             junction_from: 45
             junction_to: 21
@@ -114,3 +142,7 @@ routes:
             junction_from: 21
             junction_to: 45
             data_direction: "northBound"
+          - road_name: "M74"
+            junction_from: 22
+            junction_to: 8
+            data_direction: "Northbound"

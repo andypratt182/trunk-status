@@ -444,6 +444,266 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
     return closures
 
 
+# ---------------------------------------------------------------------
+# Additional source: Traffic Scotland (M74 / A74(M) scraper)
+#
+# Traffic Scotland has no simple self-service API (their real-time feeds
+# require an approved-subscriber application), so this scrapes their
+# public, server-rendered roadworks listing pages instead:
+#   - /traffic-information/roadworks           (current)
+#   - /traffic-information/planned-roadworks    (planned)
+# Both list every roadwork on Scotland's entire trunk road network (not
+# just one road) as a repeating labeled-text block per entry:
+#
+#   <heading>
+#   Location:<road> (<from>) to <road> (<to>), <direction>
+#   Start time:<date>, <time>
+#   Description:Works:
+#   <works text>
+#   Traffic Management:
+#   <traffic management text>
+#   [Diversion Information:
+#   <diversion text>]
+#   [More details](<url>)
+#
+# The road that's "M74" today is signed "A74(M)" on its southern stretch
+# near the Scotland/England border (before it becomes M74 further north
+# towards Glasgow) -- SCOTLAND_ROAD_ALIASES treats these as the same road
+# and always normalizes the output to whichever name is configured (M74).
+#
+# IMPORTANT: the text-parsing logic here (date parsing, entry-block
+# regex, junction extraction) was unit-tested against real page text
+# captured from a live fetch. The DOM-walking step that locates each
+# entry's container in the actual HTML has only been checked against a
+# plausible synthetic structure, not the live site -- no network access
+# was available while writing this. If a live run logs 0 total entries
+# on either page, that's the signal the site's real markup differs from
+# what's assumed here; if the total is healthy but 0 match M74, the road
+# may simply have no closures right now, or use a location text format
+# this doesn't recognize -- either way this fails as a warning, not a
+# build-breaking error (see load_additional_closures).
+#
+# No end time is available on these listing pages (only "Start time:"),
+# so end_datetime is always empty for this source.
+# ---------------------------------------------------------------------
+
+TRAFFIC_SCOTLAND_ROADWORKS_URL = "https://www.traffic.gov.scot/traffic-information/roadworks"
+TRAFFIC_SCOTLAND_PLANNED_ROADWORKS_URL = "https://www.traffic.gov.scot/traffic-information/planned-roadworks"
+
+# Roads that share a physical carriageway under different names/eras --
+# matching any alias is treated as a match for the canonical name.
+SCOTLAND_ROAD_ALIASES: dict[str, set[str]] = {
+    "M74": {"M74", "A74(M)"},
+}
+
+SCOTLAND_ROAD_TOKEN_RE = re.compile(r'\b(M\d+[A-Z]?|A\d+\(M\)|A\d+)\s*\(')
+
+# "3rd of August 2026, 9:30am" -- ordinal day, month name, year, 12-hour
+# time. No timezone is given on the site; treated as naive local (UK) time.
+SCOTLAND_DATE_RE = re.compile(
+    r'(\d{1,2})\w{0,2}\s+of\s+([A-Za-z]+)\s+(\d{4}),\s*(\d{1,2}):(\d{2})\s*([ap]m)',
+    re.IGNORECASE,
+)
+SCOTLAND_MONTHS = {name.lower(): i for i, name in enumerate(
+    ["January", "February", "March", "April", "May", "June", "July",
+     "August", "September", "October", "November", "December"], start=1)}
+
+# Matches one full entry's labeled-text block, keyed off stable label
+# strings rather than markup, so it survives CSS/class changes.
+SCOTLAND_ENTRY_RE = re.compile(
+    r'Location:\s*(?P<location>.+?)\s*'
+    r'Start time:\s*(?P<start>.+?)\s*'
+    r'Description:\s*Works:\s*(?P<works>.+?)\s*'
+    r'Traffic Management:\s*(?P<tm>.+?)\s*'
+    r'(?:Diversion Information:\s*(?P<diversion>.+?)\s*)?'
+    r'More details',
+    re.DOTALL,
+)
+
+
+def fetch_text(url: str, headers: dict | None = None) -> str:
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return resp.read().decode("utf-8", errors="replace")
+
+
+def parse_scottish_datetime(text: str) -> str:
+    m = SCOTLAND_DATE_RE.search(text)
+    if not m:
+        return ""
+    day, month_name, year, hour, minute, ampm = m.groups()
+    month = SCOTLAND_MONTHS.get(month_name.lower())
+    if not month:
+        return ""
+    hour = int(hour)
+    if ampm.lower() == "pm" and hour != 12:
+        hour += 12
+    elif ampm.lower() == "am" and hour == 12:
+        hour = 0
+    try:
+        return datetime(int(year), month, int(day), hour, int(minute)).isoformat()
+    except ValueError:
+        return ""
+
+
+def scotland_extract_road_tokens(location_text: str) -> list[str]:
+    return SCOTLAND_ROAD_TOKEN_RE.findall(location_text)
+
+
+def scotland_extract_junctions(text: str) -> list[int]:
+    """Same JUNCTION_RE used for the National Highways side, applied to
+    raw Traffic Scotland text (heading + location) rather than a closure
+    dict -- kept separate from extract_junctions() since that function
+    expects a closure dict with location_description/comment keys."""
+    nums = []
+    for m in JUNCTION_RE.finditer(text):
+        nums.append(int(m.group(1)))
+        if m.group(2):
+            nums.append(int(m.group(2)))
+    return nums
+
+
+def scotland_extract_direction(location_text: str) -> str:
+    tail = location_text.rsplit(",", 1)[-1].strip()
+    if re.fullmatch(r'(North|South|East|West|Clockwise|Anti[- ]?[Cc]lockwise)bound',
+                     tail, re.IGNORECASE):
+        return tail
+    return ""
+
+
+def scotland_parse_entry_text(block_text: str, detail_url: str, heading: str) -> dict | None:
+    m = SCOTLAND_ENTRY_RE.search(block_text)
+    if not m:
+        return None
+
+    location = re.sub(r'\s+', ' ', m.group("location")).strip()
+    start_text = m.group("start").strip()
+    works = re.sub(r'\s+', ' ', m.group("works")).strip()
+    tm = re.sub(r'\s+', ' ', m.group("tm")).strip()
+    diversion = m.group("diversion")
+    diversion = re.sub(r'\s+', ' ', diversion).strip() if diversion else ""
+
+    comment_parts = [f"Works: {works}", f"Traffic Management: {tm}"]
+    if diversion:
+        comment_parts.append(f"Diversion: {diversion}")
+    comment = " | ".join(comment_parts)
+
+    sid_match = re.search(r'[?&]sid=([^&]+)', detail_url)
+    record_id = f"scotland-{sid_match.group(1)}" if sid_match else f"scotland-{hash(block_text)}"
+
+    return {
+        "record_id": record_id,
+        "heading": heading,
+        "location_description": location,
+        "direction": scotland_extract_direction(location),
+        "comment": comment,
+        "start_datetime": parse_scottish_datetime(start_text),
+        "end_datetime": "",  # not available on the listing page
+        "cause_type": works,
+    }
+
+
+def scotland_parse_listing_page(html: str, validity_status: str) -> list[dict]:
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        print("Warning: beautifulsoup4 is not installed -- skipping the "
+              "Traffic Scotland source (add it to requirements.txt).")
+        return []
+
+    soup = BeautifulSoup(html, "html.parser")
+    entries = []
+    seen_blocks = set()
+
+    for link in soup.find_all("a", string=lambda s: s and "more details" in s.lower()):
+        href = link.get("href", "")
+        container = link
+        block_text = ""
+        heading = ""
+        for _ in range(8):  # walk up a bounded number of ancestors
+            container = container.parent
+            if container is None:
+                break
+            text = container.get_text("\n", strip=True)
+            if "Location:" in text and "Start time:" in text and "Description:" in text:
+                block_text = text
+                heading_tag = container.find(["h2", "h3", "h4"])
+                heading = heading_tag.get_text(strip=True) if heading_tag else ""
+                break
+
+        if not block_text or block_text in seen_blocks:
+            continue
+        seen_blocks.add(block_text)
+
+        entry = scotland_parse_entry_text(block_text, href, heading)
+        if entry:
+            entry["validity_status"] = validity_status
+            entries.append(entry)
+
+    return entries
+
+
+def scotland_filter_and_normalize(raw_entries: list[dict], road_name: str,
+                                   source_label: str) -> list[dict]:
+    """Filter to the requested road (checking all known aliases) and
+    convert to the same flat record shape used by the rest of this
+    script. No junction filtering here -- that's handled uniformly by
+    rows_for_leg() per route leg, same as every other source."""
+    aliases = {a.upper() for a in SCOTLAND_ROAD_ALIASES.get(road_name, {road_name})}
+    results = []
+    for e in raw_entries:
+        tokens = {t.upper() for t in scotland_extract_road_tokens(e["location_description"])}
+        if not (tokens & aliases):
+            continue
+
+        results.append({
+            "record_id": e["record_id"],
+            "road_name": road_name,  # always normalized to the canonical name
+            "direction": e["direction"],
+            "location_description": e["location_description"],
+            "comment": e["comment"],
+            "start_datetime": e["start_datetime"],
+            "end_datetime": e["end_datetime"],
+            "validity_status": e["validity_status"],
+            "cause_type": e["cause_type"],
+            "lanes_restricted": None,
+            "lanes_operational": None,
+            "source_label": source_label,
+        })
+    return results
+
+
+def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
+    all_results = []
+    pages = [
+        (TRAFFIC_SCOTLAND_ROADWORKS_URL, "active"),
+        (TRAFFIC_SCOTLAND_PLANNED_ROADWORKS_URL, "planned"),
+    ]
+    for url, status in pages:
+        print(f"Fetching {url} ...")
+        try:
+            html = fetch_text(url, headers={"User-Agent": "route-closures-build/1.0"})
+        except urllib.error.HTTPError as e:
+            print(f"Warning: HTTP {e.code} {e.reason} fetching {url} -- skipping this page.")
+            continue
+
+        raw = scotland_parse_listing_page(html, status)
+        print(f"  parsed {len(raw)} total entries on this page (all roads)")
+        matched = scotland_filter_and_normalize(raw, road_name, source_label="Traffic Scotland (scraped)")
+        print(f"  {len(matched)} match {road_name}"
+              f" (aliases: {', '.join(sorted(SCOTLAND_ROAD_ALIASES.get(road_name, {road_name})))})")
+        all_results.extend(matched)
+
+    if not all_results:
+        print("Warning: 0 matching entries found from Traffic Scotland. If this "
+              "is unexpected, check the 'parsed N total entries' counts above -- "
+              "0 there means the page's HTML structure didn't match what this "
+              "parser expects; a healthy total with 0 matches likely just means "
+              "no current/planned closures on this road right now.")
+
+    return all_results
+
+
 def load_additional_closures(site_cfg: dict) -> list[dict]:
     extra: list[dict] = []
     for source in site_cfg.get("additional_sources", []) or []:
@@ -451,6 +711,14 @@ def load_additional_closures(site_cfg: dict) -> list[dict]:
         if source_type == "xlsx_advance_notice":
             try:
                 extra.extend(fetch_from_xlsx_advance_notice(source["url"]))
+            except Exception as e:  # noqa: BLE001 -- additional sources are best-effort
+                print(f"Warning: additional source '{source_type}' failed ({e}) -- "
+                      f"continuing without it.")
+        elif source_type == "traffic_scotland_scraper":
+            try:
+                extra.extend(fetch_from_traffic_scotland(
+                    road_name=source.get("road_name", "M74"),
+                ))
             except Exception as e:  # noqa: BLE001 -- additional sources are best-effort
                 print(f"Warning: additional source '{source_type}' failed ({e}) -- "
                       f"continuing without it.")

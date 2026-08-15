@@ -3,7 +3,7 @@
 A small static site that shows current/upcoming roadworks for a handful of
 hand-picked road sections ("routes"), each split into northbound and
 southbound pages -- and each direction can chain together several roads
-(e.g. M6 -> M58 -> M57) to model a real driving route. Built with Python +
+(e.g. M74 -> M6 -> M58 -> M57) to model a real driving route. Built with Python +
 Jinja2, rebuilt automatically on a schedule by GitHub Actions, and published
 with GitHub Pages.
 
@@ -15,7 +15,7 @@ with GitHub Pages.
    flat JSON mirror, see below), filters them per leg, and renders static
    HTML into `_site/`.
 3. `.github/workflows/build-deploy.yml` -- runs `build.py` on a schedule
-   (default: every 6 hours) and publishes `_site/` to GitHub Pages.
+   (default: every 10 minutes) and publishes `_site/` to GitHub Pages.
 
 ## Data source: the live National Highways API (default)
 
@@ -105,6 +105,40 @@ wrapped to fail gracefully and just log a warning if something's wrong.
 
 To turn this off, delete the `additional_sources:` block from `routes.yaml`.
 
+## Additional source: Traffic Scotland (M74)
+
+Also layered in by default: a scraper for Traffic Scotland's public
+roadworks listings (current + planned), filtered to the M74. Unlike
+National Highways, Traffic Scotland doesn't offer a simple self-service
+API key — their real-time feeds require an approved-subscriber
+application — so this scrapes their public, server-rendered listing pages
+instead. Rows show as "Traffic Scotland (scraped)" in the Source column.
+
+**The M74/A74(M) alias**: the same physical road is signed "A74(M)" on
+its southern stretch near the Scotland/England border, becoming "M74"
+further north towards Glasgow. `build.py` treats these as the same road
+(`SCOTLAND_ROAD_ALIASES`) and always normalizes the output to "M74", so
+route legs just use `road_name: "M74"` regardless of which name a given
+closure was published under.
+
+**Known limitations**:
+- **No end time.** The listing pages only show a start time. `end_datetime`
+  is always empty for this source — `format_dt()` handles that gracefully
+  (renders blank), but these rows will look sparser than API-sourced ones.
+- **No timezone given on the site** — start times are stored as naive
+  local (UK) time, not authoritative to the minute across a DST boundary.
+- **Unverified against live markup.** The text-parsing logic (date
+  parsing, entry-block regex, junction extraction) was unit-tested
+  against real page text captured from a live fetch. The DOM-walking step
+  that locates each entry's container in the actual HTML has only been
+  tested against a plausible synthetic structure — no network access was
+  available while writing it. If a live run logs `parsed 0 total entries`
+  for either Traffic Scotland page, that's the signal the real markup
+  differs from what's assumed in `build.py` (search for
+  `scotland_parse_listing_page`) — a healthy total with 0 matches for M74
+  specifically just means no current/planned closures on that road right
+  now. Either way this fails as a warning, not a build-breaking error.
+
 ## Set up your routes
 
 Edit `routes.yaml`. Each route has a northbound and southbound direction,
@@ -147,5 +181,5 @@ Then open `_site/index.html` in a browser.
 ## Adjusting the rebuild schedule
 
 Edit the `cron` line in `.github/workflows/build-deploy.yml`. It's currently
-`0 */6 * * *` (every 6 hours, UTC). Use https://crontab.guru to build a
+`*/10 * * * *` (every 10 minutes, UTC). Use https://crontab.guru to build a
 different schedule.
