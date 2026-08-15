@@ -24,6 +24,8 @@
   {% endfor %}
 </div>
 
+<div class="day-filter" role="tablist" aria-label="Filter by day" data-day-filter></div>
+
 {% for leg in leg_groups %}
 <section class="leg-section">
   <h2 class="leg-section-title">
@@ -38,7 +40,7 @@
 
   {% if leg.rows %}
   <div class="table-wrap">
-    <table class="closures">
+    <table class="closures" data-day-filter-table>
       <thead>
         <tr>
           <th>Status</th>
@@ -52,7 +54,7 @@
       </thead>
       <tbody>
         {% for row in leg.rows %}
-        <tr class="status-{{ row.status }}">
+        <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}">
           <td><span class="status-dot"></span>{{ row.status | capitalize }}</td>
           <td class="location-cell">
             {{ row.location }}
@@ -77,6 +79,7 @@
       </tbody>
     </table>
   </div>
+  <p class="empty-state filtered-empty" data-day-filter-empty hidden>No closures for the selected day in this section.</p>
   {% else %}
   <div class="empty-state">No closures currently reported for this section.</div>
   {% endif %}
