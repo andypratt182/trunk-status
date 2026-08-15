@@ -13,7 +13,9 @@
   <div class="wrap">
     <p class="site-title"><a href="index.html">{{ site_title }}</a></p>
     <div class="feed-meta">
-      Feed updated {{ feed_updated[:16] | replace("T", " ") }} UTC<br>
+      {% if feed_updated and feed_updated != generated_at %}
+      Feed updated {{ feed_updated }}<br>
+      {% endif %}
       Page built {{ generated_at }}
     </div>
   </div>
