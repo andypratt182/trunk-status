@@ -324,6 +324,11 @@ table.closures tbody tr:last-child td { border-bottom: none; }
 .status-suspended { color: var(--grey-status); }
 
 .lanes-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.source-cell {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 .location-cell { max-width: 320px; }
 .location-cell .comment {
   display: block;
