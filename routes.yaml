@@ -34,6 +34,26 @@ site:
   # source: "flat_json"
   # data_url: "https://raw.githubusercontent.com/andypratt182/Road-data/refs/heads/main/data/road_data.json"
 
+  # --- Additional source: National Highways advance-notice XLSX ---
+  # This is the public "7-day closure report" -- it lists FULL closures
+  # (whole carriageway shut, typically 8pm-6am) up to 7 days ahead, and can
+  # show closures *before* they appear via the API (the API only reports
+  # closures once physical signs/signals are actively set on the road,
+  # which often happens closer to the closure time than this report is
+  # published). Rows from this source are tagged "Advance notice (full
+  # closure)" in the site's Source column so it's clear which data they
+  # came from. This is layered on top of whichever primary "source:" above
+  # is active -- remove this block entirely to turn it off.
+  #
+  # NOTE: this file's real column layout hasn't been verified (see build.py
+  # comments) -- check the first live build's log output for a line like
+  # "sheet '...' headers: (...)" to confirm it parsed correctly, and share
+  # that output if it comes back with 0 rows so the column-matching can be
+  # corrected.
+  additional_sources:
+    - type: "xlsx_advance_notice"
+      url: "https://nationalhighways.co.uk/media/1dgh4t0q/7-day-closure-report.xlsx"
+
 routes:
   - id: axis
     name: "Axis"

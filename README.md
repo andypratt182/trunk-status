@@ -44,10 +44,12 @@ Notes on this data source:
   into the same simple record shape used throughout the script
   (`normalize_datex_response()`), so route matching works identically
   regardless of which source you use.
-- `lookahead_days` in `routes.yaml` (default 60) controls how far ahead
-  closures are fetched -- the API's own default window is much narrower
-  (effectively "today") if no date range is given, so this is set
-  explicitly to make sure upcoming roadworks show up.
+- `lookahead_days` in `routes.yaml` (default 30, and clamped to 30 if set
+  higher) controls how far ahead closures are fetched. The API enforces a
+  hard maximum 30-day window between `startDateTime` and `endDateTime` and
+  returns an HTTP 500 if you exceed it -- and its own default window is
+  much narrower still (effectively "today") if no date range is given at
+  all, so this is set explicitly to make sure upcoming roadworks show up.
 - Rate limit: 10 calls/minute per key. This build makes 1 call per run,
   so this is not a concern even at a frequent rebuild schedule.
 - Known data limitation (per National Highways' own docs): closures are
@@ -61,6 +63,38 @@ If you'd rather not deal with an API key, `routes.yaml` has a commented-out
 the same field names build.py expects (`road_name`, `direction`,
 `location_description`, etc.). Swap the `site:` block in `routes.yaml` to
 use this instead -- see the comments in that file.
+
+## Additional source: advance-notice full closures (XLSX)
+
+`routes.yaml` also layers in National Highways' public "7-day closure
+report" by default — a spreadsheet of **full closures** (whole carriageway
+shut, usually 8pm–6am) published up to 7 days ahead. This can show a
+closure *before* it appears via the API, because the API only reports what's
+currently signed on the road (see the note above), while this report is
+published from the works schedule itself.
+
+Rows from this source appear in the site's **Source** column as "Advance
+notice (full closure)" so they're clearly distinguishable from live API
+rows.
+
+**This is unverified against a real download** — I wrote the column-matching
+flexibly (by keyword, not exact position) and with verbose logging rather
+than against a confirmed schema, since I couldn't fetch the actual binary
+file to inspect it directly. On your first live build, check the Actions
+log for lines like:
+
+```
+sheet 'Friday 14 August' headers: ('Road', 'Direction', 'Location', ...)
+sheet 'Friday 14 August': parsed 12 closure rows
+```
+
+If a sheet instead logs `no recognizable 'road' column`, or the parsed row
+count is unexpectedly 0, share that log output and the column-matching in
+`build.py` (`XLSX_HEADER_SYNONYMS`) can be corrected to match the real
+headers. A failure in this source never breaks the rest of the build — it's
+wrapped to fail gracefully and just log a warning if something's wrong.
+
+To turn this off, delete the `additional_sources:` block from `routes.yaml`.
 
 ## Set up your routes
 

@@ -27,12 +27,14 @@ Environment:
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
 import shutil
 import urllib.error
 import urllib.request
+from datetime import date as date_cls
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -64,19 +66,46 @@ def load_routes() -> dict:
 # Fetching + normalizing closures from either data source
 # ---------------------------------------------------------------------
 
-def fetch_json(url: str, headers: dict | None = None) -> dict:
+def fetch_json(url: str, headers: dict | None = None) -> tuple[dict, dict]:
+    """Returns (payload, response_headers) so callers can inspect pagination
+    signals like a Link header, which json.load() alone would discard."""
     if url.startswith("file://"):
-        return json.load(open(url[len("file://"):]))
+        return json.load(open(url[len("file://"):])), {}
     req = urllib.request.Request(url, headers=headers or {})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return json.load(resp)
+            payload = json.load(resp)
+            return payload, dict(resp.headers)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
         raise SystemExit(
             f"HTTP {e.code} {e.reason} calling:\n  {url}\n\n"
             f"Response body from the API:\n{body}\n"
         ) from None
+
+
+def find_next_page_url(payload: dict, response_headers: dict) -> str | None:
+    """
+    Best-effort detection of a "next page" link, since National Highways'
+    docs don't publish the exact pagination mechanics for this API (their
+    changelog only notes a "pagination refinement" patch in May 2025).
+    Checks the two most common conventions: an RFC 5988 Link header, and a
+    handful of common JSON field names for a continuation URL. If neither
+    is present, this returns None and the caller assumes a single page.
+    """
+    link_header = response_headers.get("Link") or response_headers.get("link")
+    if link_header:
+        for part in link_header.split(","):
+            segments = part.split(";")
+            if len(segments) >= 2 and 'rel="next"' in segments[1]:
+                return segments[0].strip().strip("<>")
+
+    for key in ("nextLink", "@odata.nextLink", "next", "nextPageLink", "nextPage"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+
+    return None
 
 
 def normalize_datex_response(payload: dict) -> list[dict]:
@@ -196,40 +225,216 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
         params.append(f"closureType={closure_type}")
     url = f"{base_url.rstrip('/')}/roads/v2.0/closures?{'&'.join(params)}"
 
-    print(f"Fetching {url} ...")
-    payload = fetch_json(url, headers={
+    headers = {
         "Ocp-Apim-Subscription-Key": api_key,
         "X-Response-MediaType": "application/json",
         "X-Data-Format": "DATEXII",
         "Accept": "application/json",
         "User-Agent": "route-closures-build/1.0",
-    })
-    closures = normalize_datex_response(payload)
-    print(f"Loaded {len(closures)} closure-location records from the live API")
+    }
+
+    closures: list[dict] = []
+    page_num = 1
+    max_pages = 50  # safety cap so a pagination bug can't loop forever
+    while url and page_num <= max_pages:
+        print(f"Fetching {url} ...")
+        payload, response_headers = fetch_json(url, headers=headers)
+        page_closures = normalize_datex_response(payload)
+        closures.extend(page_closures)
+        print(f"  page {page_num}: {len(page_closures)} closure-location records")
+
+        next_url = find_next_page_url(payload, response_headers)
+        if next_url and next_url != url:
+            url = next_url
+            page_num += 1
+        else:
+            url = None
+
+    if page_num > 1:
+        print(f"Followed {page_num} page(s), {len(closures)} total closure-location records")
+    else:
+        print(f"Loaded {len(closures)} closure-location records from the live API "
+              f"(single page -- no pagination link found in the response)")
+
     if not closures:
         print("Warning: 0 records parsed. If this is unexpected, the API's "
               "response shape may differ from what this script expects -- "
-              "check the raw payload keys (top-level: "
-              f"{list(payload.keys())}).")
+              "check the raw payload keys.")
     return closures
 
 
-def fetch_from_flat_mirror(site_cfg: dict) -> list[dict]:
+def fetch_from_flat_mirror(site_cfg: dict) -> tuple[list[dict], str]:
     url = site_cfg["data_url"]
     print(f"Fetching {url} ...")
-    data = fetch_json(url, headers={"User-Agent": "route-closures-build/1.0"})
+    data, _headers = fetch_json(url, headers={"User-Agent": "route-closures-build/1.0"})
     closures = data["closures"]
     for c in closures:
         c.setdefault("record_id", c.get("idG") or c.get("id"))
     print(f"Loaded {len(closures)} closure records (feed updated {data.get('updated')})")
+    feed_updated = format_dt(data.get("updated", ""))
+    return closures, feed_updated
+
+
+def load_closures(site_cfg: dict) -> tuple[list[dict], str]:
+    """Returns (closures, feed_updated_label). feed_updated_label is "" when
+    the source has no separate "last updated" timestamp of its own (e.g.
+    the live API, which is fetched fresh on every build)."""
+    source = site_cfg.get("source", "flat_json")
+    if source == "national_highways_api":
+        closures = fetch_from_national_highways_api(site_cfg)
+        for c in closures:
+            c.setdefault("source_label", "Live API")
+        return closures, ""
+    closures, feed_updated = fetch_from_flat_mirror(site_cfg)
+    for c in closures:
+        c.setdefault("source_label", "Feed")
+    return closures, feed_updated
+
+
+# ---------------------------------------------------------------------
+# Additional source: National Highways' public "7-day closure report"
+# XLSX (advance notice of FULL closures, published before VSS signs are
+# activated -- so it can show closures days before they'd appear via the
+# API, which only reports what's currently signed on the road). See:
+# https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/
+#
+# IMPORTANT: this file's exact column layout has not been verified against
+# a real download (no network access was available to inspect it while
+# writing this). The parser below matches column headers flexibly by
+# keyword and logs exactly what it finds in every sheet, so if the guesses
+# below are wrong, the build log will show the real headers to fix them
+# against, and the site still builds fine from the other source(s) in the
+# meantime (a parsing failure here is a warning, not a fatal error).
+# ---------------------------------------------------------------------
+
+XLSX_HEADER_SYNONYMS: dict[str, set[str]] = {
+    "road_name": {"road", "roadname", "route"},
+    "direction": {"direction"},
+    "location_description": {
+        "location", "locationdescription", "section", "extent",
+        "closuresection", "closurelocation", "between", "workslocation",
+    },
+    "start_datetime": {
+        "startdate", "start", "closurestartdate", "datefrom",
+        "closurestart", "startdatetime",
+    },
+    "end_datetime": {
+        "enddate", "end", "closureenddate", "dateto",
+        "closureend", "enddatetime",
+    },
+    "comment": {
+        "description", "comment", "comments", "details",
+        "workdescription", "scheme", "schemedescription", "reason",
+    },
+    "validity_status": {"status", "closurestatus"},
+}
+
+
+def normalize_header(value) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
+
+
+def to_iso_datetime(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (datetime, date_cls)):
+        return value.isoformat()
+    return str(value).strip()
+
+
+def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
+    try:
+        import openpyxl
+    except ImportError:
+        print("Warning: openpyxl is not installed -- skipping the XLSX "
+              "advance-notice source (add it to requirements.txt).")
+        return []
+
+    print(f"Fetching {url} ...")
+    req = urllib.request.Request(url, headers={"User-Agent": "route-closures-build/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as e:
+        print(f"Warning: XLSX fetch failed with HTTP {e.code} {e.reason} -- skipping this source.")
+        return []
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    except Exception as e:  # noqa: BLE001 -- best-effort source, never fatal
+        print(f"Warning: could not open the XLSX file ({e}) -- skipping this source.")
+        return []
+
+    closures: list[dict] = []
+    row_counter = 0
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows_iter = ws.iter_rows(values_only=True)
+        try:
+            header_row = next(rows_iter)
+        except StopIteration:
+            continue  # empty sheet
+
+        headers = [normalize_header(h) for h in header_row]
+        print(f"  sheet '{sheet_name}' headers: {header_row}")
+
+        col_map: dict[str, int] = {}
+        for field, synonyms in XLSX_HEADER_SYNONYMS.items():
+            for idx, h in enumerate(headers):
+                if h in synonyms:
+                    col_map[field] = idx
+                    break
+
+        if "road_name" not in col_map:
+            print(f"  sheet '{sheet_name}': no recognizable 'road' column -- "
+                  f"skipping this sheet (probably not a data sheet).")
+            continue
+
+        def get(row, field):
+            idx = col_map.get(field)
+            return row[idx] if idx is not None and idx < len(row) else None
+
+        sheet_rows = 0
+        for row in rows_iter:
+            road_name = get(row, "road_name")
+            if not road_name:
+                continue
+            row_counter += 1
+            sheet_rows += 1
+            closures.append({
+                "record_id": f"xlsx-{sheet_name}-{row_counter}",
+                "road_name": str(road_name).strip(),
+                "direction": str(get(row, "direction") or "").strip(),
+                "location_description": str(get(row, "location_description") or "").strip(),
+                "comment": str(get(row, "comment") or "").strip(),
+                "start_datetime": to_iso_datetime(get(row, "start_datetime")),
+                "end_datetime": to_iso_datetime(get(row, "end_datetime")),
+                "validity_status": str(get(row, "validity_status") or "planned").strip().lower() or "planned",
+                "cause_type": "advanceNoticeFullClosure",
+                "lanes_restricted": None,
+                "lanes_operational": 0,  # this report is full closures only
+                "source_label": "Advance notice (full closure)",
+            })
+        print(f"  sheet '{sheet_name}': parsed {sheet_rows} closure rows")
+
+    print(f"Parsed {len(closures)} total rows from the XLSX advance-notice report")
     return closures
 
 
-def load_closures(site_cfg: dict) -> list[dict]:
-    source = site_cfg.get("source", "flat_json")
-    if source == "national_highways_api":
-        return fetch_from_national_highways_api(site_cfg)
-    return fetch_from_flat_mirror(site_cfg)
+def load_additional_closures(site_cfg: dict) -> list[dict]:
+    extra: list[dict] = []
+    for source in site_cfg.get("additional_sources", []) or []:
+        source_type = source.get("type")
+        if source_type == "xlsx_advance_notice":
+            try:
+                extra.extend(fetch_from_xlsx_advance_notice(source["url"]))
+            except Exception as e:  # noqa: BLE001 -- additional sources are best-effort
+                print(f"Warning: additional source '{source_type}' failed ({e}) -- "
+                      f"continuing without it.")
+        else:
+            print(f"Warning: unknown additional source type '{source_type}' -- skipping.")
+    return extra
 
 
 # ---------------------------------------------------------------------
@@ -313,6 +518,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             "lanes_restricted": c.get("lanes_restricted"),
             "lanes_operational": c.get("lanes_operational"),
             "cause": (c.get("cause_type") or "").replace("Work", " work").strip(),
+            "source_label": c.get("source_label") or "",
         })
     return rows
 
@@ -352,10 +558,13 @@ def main() -> None:
     config = load_routes()
     site_cfg = config["site"]
 
-    closures = load_closures(site_cfg)
+    closures, feed_updated = load_closures(site_cfg)
+    closures.extend(load_additional_closures(site_cfg))
+    print(f"Total closures across all sources: {len(closures)}")
 
     generated_at = datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
-    feed_updated = generated_at  # the live API has no single "feed updated" timestamp
+    if not feed_updated:
+        feed_updated = generated_at
 
     if OUTPUT_DIR.exists():
         shutil.rmtree(OUTPUT_DIR)
