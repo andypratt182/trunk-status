@@ -125,6 +125,16 @@ closure was published under.
 - **No end time.** The listing pages only show a start time. `end_datetime`
   is always empty for this source — `format_dt()` handles that gracefully
   (renders blank), but these rows will look sparser than API-sourced ones.
+- **Cross-road closures need their own explicit junction number.** Some
+  closures span two different roads (e.g. an M8/M74 interchange). If such
+  a closure has no M74-specific junction number stated directly in its
+  location text, it's excluded entirely rather than risk borrowing a
+  junction number from the diversion text that might actually belong to
+  the *other* road (a real case: an M8/M74 closure whose diversion
+  mentioned M8's own junctions 21 and 23, which would otherwise have been
+  wrongly treated as M74 junctions since they happened to fall inside the
+  M74 J8–22 range). The build log reports how many entries were skipped
+  this way.
 - **No timezone given on the site** — start times are stored as naive
   local (UK) time, not authoritative to the minute across a DST boundary.
 - **Unverified against live markup.** The text-parsing logic (date
