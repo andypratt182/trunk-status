@@ -66,12 +66,21 @@ use this instead -- see the comments in that file.
 
 ## Day filter
 
-Each route page has a row of filter buttons — **All**, **Today**,
-**Tomorrow**, then named weekdays out to 7 days (matching the
-advance-notice report's own window; the API can have data further out,
-which is still visible under "All"). This runs entirely client-side
-against the already-rendered table, so switching days is instant and
-needs no rebuild — the JS lives in `static/day-filter.js`.
+The all-routes page (`index.html`) has a row of filter buttons — **Today**,
+**Tomorrow**, named weekdays out to 7 days (matching the advance-notice
+report's own window; the API can have data further out, still visible
+under "All"), and **All** last. Selecting a day there:
+
+- recomputes each route/direction's closure count live on the index page
+  itself (from embedded per-closure date data, no rebuild needed), and
+- carries through to whichever route page you click into next, via
+  `localStorage` — that page's table is pre-filtered to the same day on
+  load, with a small hint ("Showing closures for Tomorrow — change this on
+  the all routes page") linking back to the index page to change it. There
+  are no buttons on the route pages themselves.
+
+Defaults to **Today** on a first-ever visit (no stored preference yet).
+This all runs client-side — the JS lives in `static/day-filter.js`.
 
 ## Additional source: advance-notice full closures (XLSX)
 

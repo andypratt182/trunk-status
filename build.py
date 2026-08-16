@@ -989,9 +989,14 @@ def main() -> None:
 
             directions_for_index.append({
                 "page": f"{page_id}.html",
+                "page_id": page_id,
                 "label": built["label"],
                 "count": built["total"],
                 "active_count": built["active_total"],
+                "date_summary": [
+                    {"start": r["start_iso"], "end": r["end_iso"], "status": r["status"]}
+                    for lg in built["leg_groups"] for r in lg["rows"]
+                ],
                 "leg_summary": [
                     {
                         "road_name": lg["road_name"],
