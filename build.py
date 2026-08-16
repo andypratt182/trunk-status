@@ -656,17 +656,51 @@ def scotland_parse_listing_page(html: str, validity_status: str) -> list[dict]:
     return entries
 
 
+def scotland_canonical_road(token: str) -> str:
+    """Map a raw road token to its canonical name via SCOTLAND_ROAD_ALIASES
+    (e.g. both "M74" and "A74(M)" canonicalize to "M74"), so a closure
+    mentioning both isn't mistaken for a genuine cross-road entry."""
+    token_upper = token.upper()
+    for canonical, aliases in SCOTLAND_ROAD_ALIASES.items():
+        if token_upper in {a.upper() for a in aliases}:
+            return canonical
+    return token_upper
+
+
 def scotland_filter_and_normalize(raw_entries: list[dict], road_name: str,
                                    source_label: str) -> list[dict]:
     """Filter to the requested road (checking all known aliases) and
     convert to the same flat record shape used by the rest of this
-    script. No junction filtering here -- that's handled uniformly by
-    rows_for_leg() per route leg, same as every other source."""
+    script. No junction-RANGE filtering here -- that's handled uniformly
+    by rows_for_leg() per route leg, same as every other source.
+
+    One thing IS decided here, though: whether a closure's junction
+    number (if it needs the comment fallback -- see extract_junctions) is
+    trustworthy at all. Some closures span two different roads (e.g.
+    "M8 (Slip Off M8 Wb...) to M74 (2 To 1 Lane to Slip On)"). If such a
+    closure has no junction number explicitly stated in its own location
+    text, any junction number found via the comment fallback (e.g. from
+    diversion instructions) could belong to EITHER road, with no reliable
+    way to tell which -- seen in practice: an M8/M74 interchange closure
+    whose diversion mentioned M8's own junctions 21 and 23, which would
+    otherwise have been wrongly treated as M74 junctions 21/23 just
+    because they happened to fall inside the M74 leg's range. Closures
+    that only ever mention one canonical road (accounting for the M74/
+    A74(M) alias) aren't affected by this -- the Gretna-style fallback
+    (see rows_for_leg) still applies to those.
+    """
     aliases = {a.upper() for a in SCOTLAND_ROAD_ALIASES.get(road_name, {road_name})}
     results = []
+    skipped_ambiguous = 0
     for e in raw_entries:
         tokens = {t.upper() for t in scotland_extract_road_tokens(e["location_description"])}
         if not (tokens & aliases):
+            continue
+
+        distinct_roads = {scotland_canonical_road(t) for t in tokens}
+        is_cross_road = len(distinct_roads) > 1
+        if is_cross_road and not _junctions_in_text(e["location_description"]):
+            skipped_ambiguous += 1
             continue
 
         results.append({
@@ -683,6 +717,13 @@ def scotland_filter_and_normalize(raw_entries: list[dict], road_name: str,
             "lanes_operational": None,
             "source_label": source_label,
         })
+
+    if skipped_ambiguous:
+        print(f"  skipped {skipped_ambiguous} {road_name} entr"
+              f"{'y' if skipped_ambiguous == 1 else 'ies'} that mention another road "
+              f"with no explicit {road_name} junction number of their own "
+              f"(ambiguous which road a diversion-mentioned junction belongs to)")
+
     return results
 
 
