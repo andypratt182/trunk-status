@@ -753,6 +753,15 @@ def resolve_road_name(closure: dict) -> str:
     return m.group(1) if m else ""
 
 
+def _junctions_in_text(text: str) -> list[int]:
+    nums = []
+    for m in JUNCTION_RE.finditer(text):
+        nums.append(int(m.group(1)))
+        if m.group(2):
+            nums.append(int(m.group(2)))
+    return nums
+
+
 def extract_junctions(closure: dict) -> list[int]:
     """
     Junction numbers for route matching/sorting come from the structured
@@ -762,18 +771,10 @@ def extract_junctions(closure: dict) -> list[int]:
     actually is, which would otherwise contaminate matching and sort order.
     Only fall back to the comment when location text has no junction info.
     """
-    def find_all(text: str) -> list[int]:
-        nums = []
-        for m in JUNCTION_RE.finditer(text):
-            nums.append(int(m.group(1)))
-            if m.group(2):
-                nums.append(int(m.group(2)))
-        return nums
-
-    junctions = find_all(closure.get("location_description") or "")
+    junctions = _junctions_in_text(closure.get("location_description") or "")
     if junctions:
         return junctions
-    return find_all(closure.get("comment") or "")
+    return _junctions_in_text(closure.get("comment") or "")
 
 
 def closure_matches_leg(closure: dict, road_name: str, data_direction: str,
@@ -844,8 +845,24 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
 
     rows = []
     for c in matches:
+        location_text = c.get("location_description") or c.get("comment") or "\u2014"
+
+        # If the displayed location has no junction number of its own but
+        # matching/sorting still found one (via the comment fallback in
+        # extract_junctions() -- e.g. a diversion instruction like "leave
+        # the motorway at J22"), surface it so there's never a gap between
+        # why a row is positioned where it is and what's visible about it.
+        # Worded as "near" since a diversion-derived number is an inferred
+        # proxy for the closure's location, not a stated fact about it.
+        if not _junctions_in_text(c.get("location_description") or ""):
+            fallback_junctions = extract_junctions(c)
+            if fallback_junctions:
+                uniq = sorted(set(fallback_junctions))
+                note = "/".join(f"J{j}" for j in uniq)
+                location_text = f"{location_text} \u2014 near {note}"
+
         rows.append({
-            "location": c.get("location_description") or c.get("comment") or "\u2014",
+            "location": location_text,
             "comment": c.get("comment") or "",
             "start": format_dt(c.get("start_datetime", "")),
             "end": format_dt(c.get("end_datetime", "")),
