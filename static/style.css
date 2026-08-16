@@ -283,6 +283,14 @@ button:focus-visible {
   font-weight: 600;
 }
 
+.filter-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0 0 20px;
+}
+.filter-hint a { color: var(--amber); }
+.filter-hint strong { color: var(--text); font-weight: 600; }
+
 /* --- Route page header --- */
 .route-header {
   margin-top: 18px;
