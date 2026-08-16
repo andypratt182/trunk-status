@@ -116,12 +116,28 @@ To turn this off, delete the `additional_sources:` block from `routes.yaml`.
 
 ## Additional source: Traffic Scotland (M74)
 
-Also layered in by default: a scraper for Traffic Scotland's public
-roadworks listings (current + planned), filtered to the M74. Unlike
-National Highways, Traffic Scotland doesn't offer a simple self-service
-API key — their real-time feeds require an approved-subscriber
-application — so this scrapes their public, server-rendered listing pages
-instead. Rows show as "Traffic Scotland (scraped)" in the Source column.
+Also layered in by default: a scraper for Traffic Scotland's roadworks
+data, filtered to the M74. Unlike National Highways, Traffic Scotland
+doesn't offer a simple self-service API key — their real-time feeds
+require an approved-subscriber application — so this scrapes their public
+pages instead, in two stages:
+
+1. **Listing pages** — `/traffic-information/roadworks` (current) and
+   `/traffic-information/planned-roadworks` (planned) — list every
+   roadwork on Scotland's trunk road network as plain-text blocks
+   (`Location:`/`Start time:`/`Description:`/`[More details]`). This
+   stage finds every entry whose Location mentions M74 or A74(M) and
+   grabs its "More details" link; the listing page's other fields aren't
+   used for the final record.
+2. **Each matched entry's own detail page**
+   (`/more-details?sid=...&type=roadworks`) has clean, structured fields:
+   Location (often has an explicit junction range, e.g. "M74 J8 - J9 SB"),
+   Direction, Starting, Ending, and a Roadwork description (Works: /
+   Traffic Management: / sometimes Diversion Information:). Critically,
+   this is the only place
+   a real **end date** is available — the listing pages never showed one.
+
+Rows show as "Traffic Scotland (scraped)" in the Source column.
 
 **The M74/A74(M) alias**: the same physical road is signed "A74(M)" on
 its southern stretch near the Scotland/England border, becoming "M74"
@@ -131,9 +147,6 @@ route legs just use `road_name: "M74"` regardless of which name a given
 closure was published under.
 
 **Known limitations**:
-- **No end time.** The listing pages only show a start time. `end_datetime`
-  is always empty for this source — `format_dt()` handles that gracefully
-  (renders blank), but these rows will look sparser than API-sourced ones.
 - **Cross-road closures need their own explicit junction number.** Some
   closures span two different roads (e.g. an M8/M74 interchange). If such
   a closure has no M74-specific junction number stated directly in its
@@ -144,19 +157,28 @@ closure was published under.
   wrongly treated as M74 junctions since they happened to fall inside the
   M74 J8–22 range). The build log reports how many entries were skipped
   this way.
-- **No timezone given on the site** — start times are stored as naive
-  local (UK) time, not authoritative to the minute across a DST boundary.
-- **Unverified against live markup.** The text-parsing logic (date
-  parsing, entry-block regex, junction extraction) was unit-tested
-  against real page text captured from a live fetch. The DOM-walking step
-  that locates each entry's container in the actual HTML has only been
-  tested against a plausible synthetic structure — no network access was
-  available while writing it. If a live run logs `parsed 0 total entries`
-  for either Traffic Scotland page, that's the signal the real markup
-  differs from what's assumed in `build.py` (search for
-  `scotland_parse_listing_page`) — a healthy total with 0 matches for M74
-  specifically just means no current/planned closures on that road right
-  now. Either way this fails as a warning, not a build-breaking error.
+- **No timezone given on the site** — start/end times are stored as
+  naive local (UK) time, not authoritative to the minute across a DST
+  boundary.
+- **One extra HTTP request per matched entry.** Stage 2 fetches a detail
+  page for every M74/A74(M) title found in stage 1 — fine for the
+  handful of M74 entries expected at a time, but worth knowing this
+  source makes more requests than the others.
+- **Stage 1 tested against real page content.** Both `scotland_find_road_entries`
+  (stage 1, listing pages) and `scotland_parse_detail_page` (stage 2,
+  detail pages) have been tested against actual content fetched live from
+  the site — including a real cross-road example (an A701 entry whose
+  location mentions M74 only as part of a diversion route, correctly
+  excluded by the cross-road guard since it has no M74-specific junction
+  number). The one part that's still a live-markup assumption is the DOM
+  structure `scotland_find_road_entries` walks up through to find each
+  entry's containing block — it was verified against the real page's
+  *text content*, not its exact HTML tags/classes, since the fetch tool
+  used while building this converts pages to text. If a live run logs
+  `found 0 ... entries` on a listing page, that's the signal to check
+  `scotland_find_road_entries()` against the real markup — a fetch
+  failure on any individual detail page is logged and skipped rather
+  than failing the whole build.
 
 ## Set up your routes
 
