@@ -24,7 +24,7 @@
   {% endfor %}
 </div>
 
-<p class="filter-hint" data-day-filter-hint hidden>Showing closures for <strong data-day-filter-hint-label></strong> — change this on the <a href="index.html">all routes</a> page.</p>
+<p class="filter-hint" data-day-filter-hint hidden>Showing disruptions for <strong data-day-filter-hint-label></strong> — change this on the <a href="index.html">all routes</a> page.</p>
 
 {% for leg in leg_groups %}
 <section class="leg-section">
@@ -35,7 +35,7 @@
     {% else %}
       Entire road
     {% endif %}
-    <span class="leg-count">{{ leg.count }} closure{{ 's' if leg.count != 1 else '' }}</span>
+    <span class="leg-count">{{ leg.count }} disruption{{ 's' if leg.count != 1 else '' }}</span>
   </h2>
 
   {% if leg.rows %}
@@ -81,9 +81,9 @@
       </tbody>
     </table>
   </div>
-  <p class="empty-state filtered-empty" data-day-filter-empty hidden>No closures for the selected day in this section.</p>
+  <p class="empty-state filtered-empty" data-day-filter-empty hidden>No disruptions for the selected day in this section.</p>
   {% else %}
-  <div class="empty-state">No closures currently reported for this section.</div>
+  <div class="empty-state">No disruptions currently reported for this section.</div>
   {% endif %}
 </section>
 {% endfor %}
