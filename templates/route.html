@@ -54,8 +54,8 @@
       </thead>
       <tbody>
         {% for row in leg.rows %}
-        <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}">
-          <td><span class="status-dot"></span>{{ row.status | capitalize }}</td>
+        <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}" data-source="{{ row.source_label }}">
+          <td><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span></td>
           <td class="location-cell">
             {{ row.location }}
             {% if row.comment and row.comment != row.location %}
