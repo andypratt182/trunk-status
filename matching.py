@@ -153,6 +153,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             "status": (c.get("validity_status") or "unknown").lower(),
             "lanes_restricted": c.get("lanes_restricted"),
             "lanes_operational": c.get("lanes_operational"),
+            "lane_info": c.get("lane_info") or "",
             "cause": (c.get("cause_type") or "").replace("Work", " work").strip(),
             "source_label": c.get("source_label") or "",
         })
