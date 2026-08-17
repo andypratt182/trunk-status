@@ -184,7 +184,7 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
         )
 
     base_url = site_cfg.get("api_base_url", NATIONAL_HIGHWAYS_DEFAULT_BASE_URL)
-    closure_type = site_cfg.get("closure_type")  # "planned" / "unplanned" / None (both)
+    closure_type_cfg = site_cfg.get("closure_type")  # "planned" / "unplanned" / None (both)
     lookahead_days = site_cfg.get("lookahead_days", 29)
     if lookahead_days > 29:
         print(f"Note: lookahead_days ({lookahead_days}) is at or above the API's "
@@ -195,11 +195,6 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
     start = now.strftime("%Y-%m-%dT%H:%M:%S")
     end = (now + timedelta(days=lookahead_days)).strftime("%Y-%m-%dT%H:%M:%S")
 
-    params = [f"startDateTime={start}", f"endDateTime={end}"]
-    if closure_type:
-        params.append(f"closureType={closure_type}")
-    url = f"{base_url.rstrip('/')}/roads/v2.0/closures?{'&'.join(params)}"
-
     headers = {
         "Ocp-Apim-Subscription-Key": api_key,
         "X-Response-MediaType": "application/json",
@@ -208,28 +203,50 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
         "User-Agent": "route-closures-build/1.0",
     }
 
+    # IMPORTANT: omitting closureType was originally assumed to mean "both"
+    # (per this API's apparent design), but that was never actually
+    # verified against a live response -- and it turned out to be wrong.
+    # A real run with closure_type left unset returned ONLY roadMaintenance/
+    # constructionWork/authorityOperation causes across 3,201 records, with
+    # zero incident-flavoured ones -- extremely unlikely if "both" were
+    # genuinely being returned across a live network that size over a
+    # 29-day window. So "both" is now handled explicitly, as two separate
+    # requests, rather than trusting an unverified default.
+    closure_types_to_fetch = [closure_type_cfg] if closure_type_cfg else ["planned", "unplanned"]
+
     closures: list[dict] = []
-    page_num = 1
-    max_pages = 50  # safety cap so a pagination bug can't loop forever
-    while url and page_num <= max_pages:
-        print(f"Fetching {url} ...")
-        payload, response_headers = fetch_json(url, headers=headers)
-        page_closures = normalize_datex_response(payload)
-        closures.extend(page_closures)
-        print(f"  page {page_num}: {len(page_closures)} closure-location records")
+    for closure_type in closure_types_to_fetch:
+        params = [f"startDateTime={start}", f"endDateTime={end}", f"closureType={closure_type}"]
+        url = f"{base_url.rstrip('/')}/roads/v2.0/closures?{'&'.join(params)}"
 
-        next_url = find_next_page_url(payload, response_headers)
-        if next_url and next_url != url:
-            url = next_url
-            page_num += 1
+        page_num = 1
+        max_pages = 50  # safety cap so a pagination bug can't loop forever
+        type_closures: list[dict] = []
+        while url and page_num <= max_pages:
+            print(f"Fetching {url} ...")
+            payload, response_headers = fetch_json(url, headers=headers)
+            page_closures = normalize_datex_response(payload)
+            type_closures.extend(page_closures)
+            print(f"  page {page_num}: {len(page_closures)} closure-location records")
+
+            next_url = find_next_page_url(payload, response_headers)
+            if next_url and next_url != url:
+                url = next_url
+                page_num += 1
+            else:
+                url = None
+
+        if page_num > 1:
+            print(f"  closureType={closure_type}: followed {page_num} page(s), "
+                  f"{len(type_closures)} total closure-location records")
         else:
-            url = None
+            print(f"  closureType={closure_type}: {len(type_closures)} closure-location "
+                  f"records (single page -- no pagination link found)")
+        closures.extend(type_closures)
 
-    if page_num > 1:
-        print(f"Followed {page_num} page(s), {len(closures)} total closure-location records")
-    else:
-        print(f"Loaded {len(closures)} closure-location records from the live API "
-              f"(single page -- no pagination link found in the response)")
+    print(f"Loaded {len(closures)} closure-location records from the live API "
+          f"across {len(closure_types_to_fetch)} closureType request(s) "
+          f"({', '.join(closure_types_to_fetch)})")
 
     if closures:
         # Diagnostic: real cause_type distribution, so we can see exactly
