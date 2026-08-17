@@ -15,6 +15,15 @@
  * closure count live from embedded per-closure date data (see
  * [data-day-filter-summary] script blocks), rather than requiring a
  * rebuild.
+ *
+ * Traffic Scotland rows also get their Status column refreshed on load
+ * (and their contribution to the index page's active-count) by comparing
+ * the closure's own start/end against the visitor's actual clock, rather
+ * than trusting the server-rendered snapshot from build time -- a
+ * closure's real window is often just a few hours, so a build-time
+ * status can go stale well before the next scheduled rebuild. Other
+ * sources are left as server-rendered, since they can have a status
+ * (e.g. "suspended") that isn't derivable from dates alone.
  */
 (function () {
   "use strict";
@@ -77,6 +86,49 @@
     const endParsed = endAttr ? new Date(endAttr) : start;
     const end = isNaN(endParsed.getTime()) ? start : endParsed;
     return start < dayEnd && end >= dayStart;
+  }
+
+  // Traffic Scotland's own current/planned split is just which listing
+  // page an entry appeared on -- not date-aware, and this is baked into
+  // the static HTML once at build time. A closure's real window is
+  // usually only a few hours (an overnight closure), so status can go
+  // stale well before the next scheduled rebuild. Recompute it live from
+  // the closure's own start/end against the visitor's actual clock,
+  // rather than trusting the server-rendered snapshot -- but ONLY for
+  // Traffic Scotland rows: other sources can have a status (e.g.
+  // "suspended") that isn't derivable from dates alone, so their
+  // server-rendered value is left untouched.
+  const TRAFFIC_SCOTLAND_SOURCE_LABEL = "Traffic Scotland (scraped)";
+
+  function liveStatusFor(startAttr, endAttr, fallbackStatus) {
+    if (!startAttr) return fallbackStatus;
+    const start = new Date(startAttr);
+    if (isNaN(start.getTime())) return fallbackStatus;
+    const now = new Date();
+    if (!endAttr) return now >= start ? "active" : "planned";
+    const end = new Date(endAttr);
+    if (isNaN(end.getTime())) return now >= start ? "active" : "planned";
+    return now >= start && now <= end ? "active" : "planned";
+  }
+
+  // ---- Route pages: refresh Traffic Scotland rows' status to reflect "now" ----
+  function refreshLiveStatus() {
+    const rows = document.querySelectorAll("[data-day-filter-table] tbody tr[data-source]");
+    rows.forEach((row) => {
+      if (row.getAttribute("data-source") !== TRAFFIC_SCOTLAND_SOURCE_LABEL) return;
+
+      const currentMatch = row.className.match(/status-(\w+)/);
+      const serverStatus = currentMatch ? currentMatch[1] : "planned";
+      const liveStatus = liveStatusFor(
+        row.getAttribute("data-start"), row.getAttribute("data-end"), serverStatus
+      );
+      if (liveStatus === serverStatus) return;
+
+      row.classList.remove(`status-${serverStatus}`);
+      row.classList.add(`status-${liveStatus}`);
+      const label = row.querySelector("[data-status-label]");
+      if (label) label.textContent = liveStatus.charAt(0).toUpperCase() + liveStatus.slice(1);
+    });
   }
 
   // ---- Button bar: only rendered where [data-day-filter] exists (index page) ----
@@ -182,7 +234,10 @@
         const show = dayStart === null || overlapsDay(c.start, c.end, dayStart, dayEnd);
         if (show) {
           total++;
-          if (c.status === "active") active++;
+          const effectiveStatus = c.source === TRAFFIC_SCOTLAND_SOURCE_LABEL
+            ? liveStatusFor(c.start, c.end, c.status)
+            : c.status;
+          if (effectiveStatus === "active") active++;
         }
       });
 
@@ -200,6 +255,7 @@
     applyIndexFilter(days, selection);
   });
 
+  refreshLiveStatus();
   applyTableFilter(days, selection);
   applyIndexFilter(days, selection);
 })();
