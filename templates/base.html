@@ -6,7 +6,7 @@
 <title>{% block title %}{{ site_title }}{% endblock %}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="static/style.css">
+<link rel="stylesheet" href="static/style.css{% if style_hash %}?v={{ style_hash }}{% endif %}">
 </head>
 <body>
 <header class="site-header">
@@ -26,6 +26,6 @@
   Source data: live roadworks feed · rebuilt on a schedule via GitHub Actions.
 </footer>
 </main>
-<script src="static/day-filter.js" defer></script>
+<script src="static/day-filter.js{% if script_hash %}?v={{ script_hash }}{% endif %}" defer></script>
 </body>
 </html>
