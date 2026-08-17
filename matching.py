@@ -26,6 +26,31 @@ JUNCTION_RE = re.compile(
 # the free-text comment, e.g. "M62 eastbound Jct 36...".
 ROAD_RE = re.compile(r'^(M\d+[A-Z]?|A\d+\(M\)|A\d+)\b')
 
+# Matches a lowercase/digit immediately followed by an uppercase letter --
+# a true camelCase word boundary (e.g. the "e"->"N" in "advanceNotice").
+# Deliberately does NOT match an uppercase letter that already has a space
+# (or any other non-alnum) before it, so already-human text is untouched.
+_CAMEL_CASE_BOUNDARY_RE = re.compile(r'(?<=[a-z0-9])(?=[A-Z])')
+
+
+def humanize_cause(text: str) -> str:
+    """cause_type values come in two shapes depending on the source:
+    camelCase machine identifiers (National Highways' DATEX causeType,
+    e.g. "roadMaintenance"; this project's own XLSX-source placeholder,
+    "advanceNoticeFullClosure") and already-human text (Traffic
+    Scotland's "Works:" field, e.g. "Barrier Repair, Filter Drain").
+    Splitting the first kind into words and leaving the second kind's
+    casing alone avoids two failure modes: showing a machine identifier
+    as one long run-together word (a bare `capitalize()` turns
+    "advanceNoticeFullClosure" into "Advancenoticefullclosure"), and
+    forcibly lowercasing already-well-cased human text."""
+    if not text:
+        return ""
+    spaced = _CAMEL_CASE_BOUNDARY_RE.sub(" ", text)
+    if spaced == text:
+        return text  # no camelCase boundary found -- already human-readable
+    return spaced[0].upper() + spaced[1:].lower()
+
 
 def resolve_road_name(closure: dict) -> str:
     if closure.get("road_name"):
@@ -154,7 +179,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             "lanes_restricted": c.get("lanes_restricted"),
             "lanes_operational": c.get("lanes_operational"),
             "lane_info": c.get("lane_info") or "",
-            "cause": (c.get("cause_type") or "").replace("Work", " work").strip(),
+            "cause": humanize_cause(c.get("cause_type") or ""),
             "source_label": c.get("source_label") or "",
         })
     return rows
