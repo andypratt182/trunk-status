@@ -324,6 +324,44 @@ def merge_adjacent_periods(periods: list[tuple[str, str]],
     return [(s.isoformat(), e.isoformat()) for s, e in merged]
 
 
+# Traffic Management text on long-running entries can be a per-date list,
+# e.g. "15/10/2024 - Portable Traffic Lights (TTLS), 16/10/2024 - ...",
+# one entry for every day across the whole closure. extract_tm_for_date()
+# picks out just the entry matching a specific row's own date rather than
+# showing that whole list.
+TM_DATE_ENTRY_RE = re.compile(
+    r'(\d{2})/(\d{2})/(\d{4})\s*-\s*(.+?)(?=,\s*\d{2}/\d{2}/\d{4}\s*-|\s*$)',
+    re.DOTALL,
+)
+
+
+def extract_tm_for_date(tm_text: str, target_date_iso: str) -> str:
+    """If tm_text contains a per-date list, return just the description
+    for target_date_iso's calendar date, with the date prefix stripped.
+    If tm_text has no such per-date structure (the common case -- a
+    single description like "Lane Closure (40mph)" or "Road Closure."),
+    return it unchanged. Falls back to the first listed date's
+    description if the target date isn't found in the list (safer than
+    showing the whole raw list)."""
+    tm_text = tm_text.strip()
+    matches = list(TM_DATE_ENTRY_RE.finditer(tm_text))
+    if not matches:
+        return tm_text
+
+    target_date_str = ""
+    if target_date_iso:
+        try:
+            target_date_str = datetime.fromisoformat(target_date_iso).strftime("%d/%m/%Y")
+        except ValueError:
+            pass
+
+    for day, month, year, desc in (m.groups() for m in matches):
+        if f"{day}/{month}/{year}" == target_date_str:
+            return desc.strip().rstrip(",").strip()
+
+    return matches[0].group(4).strip().rstrip(",").strip()
+
+
 def parse_detail_page(html: str, href: str) -> list[dict]:
     """Stage 2: parse one entry's detail page into one or more closure
     dicts (still missing road_name/validity_status/source_label -- the
@@ -362,14 +400,11 @@ def parse_detail_page(html: str, href: str) -> list[dict]:
     tm = re.sub(r'\s+', ' ', fields.get("Traffic Management:", "")).strip()
     diversion = re.sub(r'\s+', ' ', fields.get("Diversion Information:", "")).strip()
 
-    comment_parts = []
-    if works:
-        comment_parts.append(f"Works: {works}")
-    if tm:
-        comment_parts.append(f"Traffic Management: {tm}")
-    if diversion:
-        comment_parts.append(f"Diversion: {diversion}")
-    comment = " | ".join(comment_parts)
+    # "Works" (cause) already has its own Cause column, and Traffic
+    # Management moves to the Lanes column below (computed per-row,
+    # since it can be date-specific) -- the location subtext only needs
+    # Diversion info now, which has nowhere else to go.
+    comment = f"Diversion: {diversion}" if diversion else ""
 
     sid_match = re.search(r'[?&]sid=([^&]+)', href)
     base_record_id = f"scotland-{sid_match.group(1)}" if sid_match else f"scotland-{hash(href)}"
@@ -394,6 +429,7 @@ def parse_detail_page(html: str, href: str) -> list[dict]:
                 "record_id": f"{base_record_id}-p{i + 1}",
                 "start_datetime": period_start,
                 "end_datetime": period_end,
+                "lane_info": extract_tm_for_date(tm, period_start),
             }
             for i, (period_start, period_end) in enumerate(merged_periods)
         ]
@@ -403,6 +439,7 @@ def parse_detail_page(html: str, href: str) -> list[dict]:
         "record_id": base_record_id,
         "start_datetime": overall_start,
         "end_datetime": overall_end,
+        "lane_info": extract_tm_for_date(tm, overall_start),
     }]
 
 
