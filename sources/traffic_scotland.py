@@ -329,6 +329,35 @@ def merge_adjacent_periods(periods: list[tuple[str, str]],
 # one entry for every day across the whole closure. extract_tm_for_date()
 # picks out just the entry matching a specific row's own date rather than
 # showing that whole list.
+# "Share" / "Link for sharing" / "Copy link" (the page's share widget)
+# sit right before "Did you find..." on the detail page, but aren't in
+# DETAIL_LABELS -- so whichever section comes last (Diversion
+# Information, or Traffic Management/Works if no diversion) absorbs that
+# boilerplate as trailing text, since scan_labeled_fields() only knows to
+# stop at the next label it recognizes. Anchored to the end of the string
+# and requiring the full phrase (not just "Share" alone) so it can't
+# accidentally trim real content that happens to end in a word like
+# "shared" -- e.g. "...via the shared path" is untouched.
+TRAILING_SHARE_BOILERPLATE_RE = re.compile(
+    r'\s*Share\s*Link for sharing\s*Copy link\s*$',
+    re.IGNORECASE,
+)
+
+
+def clean_field_text(text: str) -> str:
+    """Normalize a raw extracted field: collapse whitespace, strip the
+    page's share-widget boilerplate if it leaked in as trailing text (see
+    TRAILING_SHARE_BOILERPLATE_RE), and fix a source-data spacing quirk
+    where an opening parenthesis sometimes has no preceding space and an
+    extra space just inside it, e.g. "Lane Closure( 40mph)" ->
+    "Lane Closure (40mph)"."""
+    text = re.sub(r'\s+', ' ', text or '').strip()
+    text = TRAILING_SHARE_BOILERPLATE_RE.sub('', text).strip()
+    text = re.sub(r'(?<=\S)\(', ' (', text)   # ensure a space before "("
+    text = re.sub(r'\(\s+', '(', text)        # no space right after "("
+    return text
+
+
 TM_DATE_ENTRY_RE = re.compile(
     r'(\d{2})/(\d{2})/(\d{4})\s*-\s*(.+?)(?=,\s*\d{2}/\d{2}/\d{4}\s*-|\s*$)',
     re.DOTALL,
@@ -343,7 +372,7 @@ def extract_tm_for_date(tm_text: str, target_date_iso: str) -> str:
     return it unchanged. Falls back to the first listed date's
     description if the target date isn't found in the list (safer than
     showing the whole raw list)."""
-    tm_text = tm_text.strip()
+    tm_text = clean_field_text(tm_text)
     matches = list(TM_DATE_ENTRY_RE.finditer(tm_text))
     if not matches:
         return tm_text
@@ -357,9 +386,9 @@ def extract_tm_for_date(tm_text: str, target_date_iso: str) -> str:
 
     for day, month, year, desc in (m.groups() for m in matches):
         if f"{day}/{month}/{year}" == target_date_str:
-            return desc.strip().rstrip(",").strip()
+            return clean_field_text(desc.rstrip(","))
 
-    return matches[0].group(4).strip().rstrip(",").strip()
+    return clean_field_text(matches[0].group(4).rstrip(","))
 
 
 def parse_detail_page(html: str, href: str) -> list[dict]:
@@ -396,9 +425,9 @@ def parse_detail_page(html: str, href: str) -> list[dict]:
     start_text = fields.get("Starting", "").strip()
     end_text = fields.get("Ending", "").strip()
     days_times_text = fields.get("Days & times affected", "")
-    works = re.sub(r'\s+', ' ', fields.get("Works:", "")).strip()
-    tm = re.sub(r'\s+', ' ', fields.get("Traffic Management:", "")).strip()
-    diversion = re.sub(r'\s+', ' ', fields.get("Diversion Information:", "")).strip()
+    works = clean_field_text(fields.get("Works:", ""))
+    tm = clean_field_text(fields.get("Traffic Management:", ""))
+    diversion = clean_field_text(fields.get("Diversion Information:", ""))
 
     # "Works" (cause) already has its own Cause column, and Traffic
     # Management moves to the Lanes column below (computed per-row,
