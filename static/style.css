@@ -409,4 +409,52 @@ footer.site-footer {
     transform: rotate(90deg);
     margin: 2px 0;
   }
+
+  /* Closures table -> one bordered card per closure, each field labeled
+     above its value, no horizontal scrolling. Same underlying <tr>/<td>
+     markup as the desktop table (just restyled), so all existing
+     day-filter/live-status JS keeps working unchanged -- it targets the
+     same elements either way. */
+  .table-wrap { overflow-x: visible; border: none; }
+  table.closures { min-width: 0; }
+  table.closures thead { display: none; }
+  table.closures, table.closures tbody, table.closures tr, table.closures td {
+    display: block;
+    width: 100%;
+  }
+  table.closures tr {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+  table.closures tbody tr:last-child { margin-bottom: 0; }
+  table.closures tbody tr:hover { background: var(--panel); }
+  table.closures td {
+    border-bottom: none;
+    padding: 7px 0;
+  }
+  table.closures td:first-child { padding-top: 0; }
+  table.closures td:last-child { padding-bottom: 0; }
+  table.closures td::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+  }
+  table.closures td.location-cell {
+    font-size: 1.02rem;
+    font-weight: 600;
+    max-width: none;
+  }
+  /* table.closures tr { display: block; } above has higher specificity
+     than the browser's default [hidden] { display: none; }, which would
+     otherwise leave day-filter/live-status-hidden rows visibly showing
+     as cards. This explicitly wins that fight back. */
+  table.closures tr[hidden] { display: none; }
 }
