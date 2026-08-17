@@ -19,6 +19,17 @@ with GitHub Pages.
 3. `.github/workflows/build-deploy.yml` -- runs `build.py` on a schedule
    (default: every 10 minutes) and publishes `_site/` to GitHub Pages.
 
+**Static asset cache-busting**: `static/style.css` and `static/day-filter.js`
+are referenced with a `?v=<content hash>` query string (`content_hash()`
+in `build.py`), so a genuine change to either file always forces a fresh
+fetch. The HTML itself is always fresh on every build (it has a new "Page
+built" timestamp baked in every time), but without this, a browser or
+GitHub's CDN could keep serving a stale cached copy of the CSS/JS
+specifically, indefinitely, even once the HTML on the page is visibly a
+new build — this is why a CSS fix can sometimes not show up on a phone
+even after a successful rebuild. The hash only changes when the file's
+actual content changes, so it doesn't force a refetch on every rebuild.
+
 ## Project structure
 
 ```

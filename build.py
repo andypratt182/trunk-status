@@ -35,6 +35,7 @@ Environment:
 """
 from __future__ import annotations
 
+import hashlib
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +58,19 @@ OUTPUT_DIR = ROOT / "_site"
 def load_routes() -> dict:
     with open(ROOT / "routes.yaml") as f:
         return yaml.safe_load(f)
+
+
+def content_hash(path: Path) -> str:
+    """Short hash of a static file's own content, used as a cache-busting
+    query string on its <link>/<script> tag. The HTML is guaranteed fresh
+    on every build (it has a new "Page built" timestamp baked in every
+    time), but style.css/day-filter.js are referenced by the exact same
+    URL on every build -- so a browser or CDN can keep serving a stale
+    cached copy of THOSE files indefinitely, even once the HTML on the
+    page is visibly fresh. Since the query string only changes when the
+    file's actual content changes, this doesn't force a refetch on every
+    rebuild -- only when something in the file genuinely changed."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:10]
 
 
 def load_closures(site_cfg: dict) -> tuple[list[dict], str]:
@@ -116,6 +130,12 @@ def main() -> None:
     if STATIC_DIR.exists():
         shutil.copytree(STATIC_DIR, OUTPUT_DIR / "static")
 
+    # Cache-busting query strings for style.css/day-filter.js -- see
+    # content_hash()'s docstring for why this is needed even though the
+    # HTML itself is always fresh.
+    style_hash = content_hash(STATIC_DIR / "style.css") if (STATIC_DIR / "style.css").exists() else ""
+    script_hash = content_hash(STATIC_DIR / "day-filter.js") if (STATIC_DIR / "day-filter.js").exists() else ""
+
     env = Environment(loader=FileSystemLoader(str(TEMPLATES_DIR)))
     route_cards = []  # summary data for the index page
 
@@ -133,6 +153,8 @@ def main() -> None:
                 leg_groups=built["leg_groups"],
                 generated_at=generated_at,
                 feed_updated=feed_updated,
+                style_hash=style_hash,
+                script_hash=script_hash,
             )
             (OUTPUT_DIR / f"{page_id}.html").write_text(html, encoding="utf-8")
 
@@ -168,6 +190,8 @@ def main() -> None:
         route_cards=route_cards,
         generated_at=generated_at,
         feed_updated=feed_updated,
+        style_hash=style_hash,
+        script_hash=script_hash,
     )
     (OUTPUT_DIR / "index.html").write_text(index_html, encoding="utf-8")
 

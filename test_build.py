@@ -17,6 +17,7 @@ import sys
 import urllib.error
 
 import matching
+import build
 from sources import national_highways as nh
 from sources import traffic_scotland as scot
 from sources import xlsx_advance_notice as xlsx
@@ -470,9 +471,14 @@ check(
     and scot.compute_validity_status("2026-08-20T08:00:00", "2026-08-20T12:00:00", _now, fallback="planned") == "active",
 )
 check(
-    "missing or unparseable dates fall back to the listing-page status rather than guessing",
-    scot.compute_validity_status("2026-08-20T08:00:00", "", _now, fallback="active") == "active"
-    and scot.compute_validity_status("not-a-date", "2026-08-20T18:00:00", _now, fallback="planned") == "planned",
+    "start present but end missing -> compares against start alone, not a blind fallback",
+    scot.compute_validity_status("2026-08-20T08:00:00", "", _now, fallback="planned") == "active"  # now is after start
+    and scot.compute_validity_status("2026-08-25T08:00:00", "", _now, fallback="active") == "planned",  # now is before start
+)
+check(
+    "even start missing/unparseable -> falls back to the listing-page status (nothing real left to compare)",
+    scot.compute_validity_status("", "", _now, fallback="active") == "active"
+    and scot.compute_validity_status("not-a-date", "also-not-a-date", _now, fallback="planned") == "planned",
 )
 
 section("traffic_scotland: fetch_from_traffic_scotland overrides a stale listing-page label with real status")
@@ -609,6 +615,21 @@ check(
     "rogue M8/M74 entry (M8's junctions, not M74's) is excluded",
     len(results) == 0,
 )
+
+
+section("build: content_hash (cache-busting for static assets)")
+
+import tempfile as _tempfile
+with _tempfile.NamedTemporaryFile(suffix=".css", delete=False) as f:
+    f.write(b"body { color: red; }")
+    tmp_path = build.Path(f.name)
+hash1 = build.content_hash(tmp_path)
+check("hash is a short deterministic string", len(hash1) == 10 and hash1 == build.content_hash(tmp_path))
+
+tmp_path.write_bytes(b"body { color: blue; }")
+hash2 = build.content_hash(tmp_path)
+check("hash changes when file content changes (forces a fresh fetch)", hash1 != hash2)
+tmp_path.unlink()
 
 
 # =======================================================================
