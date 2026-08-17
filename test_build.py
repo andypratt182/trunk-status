@@ -293,7 +293,154 @@ merged = scot.merge_adjacent_periods(raw)
 check("merges into one period across the midnight boundary", len(merged) == 1)
 check("merged span is Thu 22:00 -> Fri 06:00", merged[0] == ("2026-08-20T22:00:00", "2026-08-21T06:00:00"))
 
-section("traffic_scotland: cross-road ambiguity guard (real rogue M8/M74 example)")
+section("traffic_scotland: clean_field_text (paren spacing + share-widget boilerplate)")
+
+check(
+    "'Lane Closure( 40mph)' -> 'Lane Closure (40mph)' (source-data spacing quirk)",
+    scot.clean_field_text("Lane Closure( 40mph)") == "Lane Closure (40mph)",
+)
+check(
+    "already-correct spacing is left unchanged (idempotent)",
+    scot.clean_field_text("Lane Closure (40mph)") == "Lane Closure (40mph)",
+)
+check(
+    "share-widget boilerplate stripped from trailing text",
+    scot.clean_field_text(
+        "Leave the motorway at J22\nShare\nLink for sharing\nCopy link"
+    ) == "Leave the motorway at J22",
+)
+check(
+    "a legitimate word like 'shared' is NOT falsely stripped",
+    scot.clean_field_text("Diversion via the shared path to the north")
+    == "Diversion via the shared path to the north",
+)
+
+section("traffic_scotland: extract_tm_for_date (per-date Traffic Management lists)")
+
+tm_list = (
+    "15/10/2024 - Portable Traffic Lights (TTLS), "
+    "16/10/2024 - Portable Traffic Lights (TTLS), "
+    "05/11/2025 - No Obstruction on Carriageway or Footway( 40mph)"
+)
+check(
+    "picks the entry matching the target date, date prefix stripped and paren spacing fixed",
+    scot.extract_tm_for_date(tm_list, "2025-11-05T00:00:00")
+    == "No Obstruction on Carriageway or Footway (40mph)",
+)
+check(
+    "unmatched date falls back to the first entry, not the whole raw list",
+    scot.extract_tm_for_date(tm_list, "2099-01-01T00:00:00") == "Portable Traffic Lights (TTLS)",
+)
+check(
+    "plain single-value TM text (the common case) passed through unchanged",
+    scot.extract_tm_for_date("Lane Closure (40mph)", "2026-08-20T22:00:00") == "Lane Closure (40mph)",
+)
+
+section("traffic_scotland: parse_detail_page routes TM to lane_info, keeps only Diversion in comment")
+
+decluttered_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M74 J8 - J10 SB - Total Closure
+Direction
+Southbound
+Starting
+2nd of August 2026, 10:00pm
+Ending
+4th of September 2026, 6:00am
+Days & times affected
+Week commencing 17th Aug
+Activity PeriodsExpand
+- Thu 20th Aug - 22:00 to 23:59
+- Fri 21st Aug - 00:00 to 06:00
+Roadwork description
+Works:
+Barrier Repair, Filter Drain
+Traffic Management:
+Road Closure.
+Diversion Information:
+S/B traffic to exit M74 at junction 8, re-join the M74 at J10 S/B
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+entries = scot.parse_detail_page(
+    decluttered_html, "https://www.traffic.gov.scot/more-details?sid=cSW202669760&type=roadworks",
+)
+check("one merged row produced", len(entries) == 1)
+e = entries[0]
+check("location_description stays clean", e["location_description"] == "M74 J8 - J10 SB - Total Closure")
+check("comment holds ONLY diversion, not Works/TM", e["comment"] == (
+    "Diversion: S/B traffic to exit M74 at junction 8, re-join the M74 at J10 S/B"
+))
+check("lane_info holds the Traffic Management text", e["lane_info"] == "Road Closure.")
+check("cause_type still holds Works text for the Cause column",
+      e["cause_type"] == "Barrier Repair, Filter Drain")
+
+section("traffic_scotland: parse_detail_page strips share-widget boilerplate that leaks in as trailing text")
+
+boilerplate_leak_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M74 (Gretna Nth Slip to Gretna Int O'Bridge), Northbound
+Direction
+Northbound
+Starting
+20th of August 2026, 8:00pm
+Ending
+21st of August 2026, 6:00am
+Roadwork description
+Works:
+Lining Works
+Traffic Management:
+Road Closure( immediate)
+Diversion Information:
+Leave the motorway at J22 - A75 - turn right on to Glasgow Road
+Share
+Link for sharing
+Copy link
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+entries = scot.parse_detail_page(
+    boilerplate_leak_html, "https://www.traffic.gov.scot/more-details?sid=cSWTEST&type=roadworks",
+)
+check("one entry parsed", len(entries) == 1)
+check("share-widget boilerplate NOT in comment",
+      "Share" not in entries[0]["comment"] and "Copy link" not in entries[0]["comment"])
+check("diversion text stays intact", "Leave the motorway at J22" in entries[0]["comment"])
+check("Traffic Management paren spacing fixed", entries[0]["lane_info"] == "Road Closure (immediate)")
+
+
+section("matching: lane_info flows through rows_for_leg into the rendered row")
+
+closure_with_lane_info = {
+    "record_id": "x", "road_name": "M74", "direction": "Southbound",
+    "location_description": "M74 J8 - J10 SB", "comment": "",
+    "lane_info": "Road Closure.",
+    "start_datetime": "2026-08-20T22:00:00", "end_datetime": "2026-08-21T06:00:00",
+    "validity_status": "planned", "cause_type": "Barrier Repair",
+    "lanes_restricted": None, "lanes_operational": None, "source_label": "test",
+}
+rows = matching.rows_for_leg([closure_with_lane_info], "M74", "Southbound", 8, 22)
+check("row.lane_info populated", rows[0]["lane_info"] == "Road Closure.")
+
+nh_closure_unaffected = {
+    "record_id": "y", "road_name": "M6", "direction": "southBound",
+    "location_description": "M6 southbound J40 to J39", "comment": "",
+    "start_datetime": "2026-08-20T00:00:00", "end_datetime": "",
+    "validity_status": "active", "cause_type": "roadMaintenance",
+    "lanes_restricted": 1, "lanes_operational": 2, "source_label": "Live API",
+}
+rows = matching.rows_for_leg([nh_closure_unaffected], "M6", "southBound", 45, 26)
+check("National Highways rows unaffected (no lane_info key -> falls back to numeric lanes)",
+      rows[0]["lane_info"] == "" and rows[0]["lanes_restricted"] == 1)
+
+
+
 
 rogue_listing_html = """
 <html><body><div class="views-row">
