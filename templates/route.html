@@ -55,14 +55,14 @@
       <tbody>
         {% for row in leg.rows %}
         <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}" data-source="{{ row.source_label }}">
-          <td><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span></td>
-          <td class="location-cell">
+          <td data-label="Status"><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span></td>
+          <td class="location-cell" data-label="Location">
             {{ row.location }}
             {% if row.comment and row.comment != row.location %}
               <span class="comment">{{ row.comment }}</span>
             {% endif %}
           </td>
-          <td class="lanes-cell">
+          <td class="lanes-cell" data-label="Lanes">
             {% if row.lane_info %}
               {{ row.lane_info }}
             {% elif row.lanes_restricted is not none %}
@@ -72,10 +72,10 @@
               Full closure
             {% else %}—{% endif %}
           </td>
-          <td>{{ row.cause | capitalize }}</td>
-          <td>{{ row.start }}</td>
-          <td>{{ row.end }}</td>
-          <td class="source-cell">{{ row.source_label }}</td>
+          <td data-label="Cause">{{ row.cause | capitalize }}</td>
+          <td data-label="Start">{{ row.start }}</td>
+          <td data-label="End">{{ row.end }}</td>
+          <td class="source-cell" data-label="Source">{{ row.source_label }}</td>
         </tr>
         {% endfor %}
       </tbody>
