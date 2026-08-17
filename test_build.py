@@ -1,0 +1,357 @@
+#!/usr/bin/env python3
+"""
+Tests for matching.py and sources/*.py.
+
+Run with: python3 test_build.py
+
+No test framework dependency (just plain asserts via check()) -- keeps
+this runnable in the same environment as build.py itself, with no extra
+requirements.txt entries. Exits non-zero on the first failure.
+
+Several of these use real captured content (from live fetches made while
+building each source) rather than synthetic data, noted per test.
+"""
+from __future__ import annotations
+
+import sys
+import urllib.error
+
+import matching
+from sources import national_highways as nh
+from sources import traffic_scotland as scot
+from sources import xlsx_advance_notice as xlsx
+
+FAILURES = 0
+
+
+def check(label: str, cond: bool) -> None:
+    global FAILURES
+    status = "PASS" if cond else "FAIL"
+    print(f"[{status}] {label}")
+    if not cond:
+        FAILURES += 1
+
+
+def section(title: str) -> None:
+    print(f"\n--- {title} ---")
+
+
+# =======================================================================
+# matching.py
+# =======================================================================
+
+section("matching: extract_junctions (location vs. comment fallback)")
+
+check(
+    "junction from location_description",
+    matching.extract_junctions({"location_description": "M6 southbound between J40 and J39", "comment": ""})
+    == [40, 39],
+)
+check(
+    "falls back to comment when location has none",
+    matching.extract_junctions({"location_description": "", "comment": "Closure near Junction 12"}) == [12],
+)
+check(
+    "diversion text in comment does NOT contaminate when location already has junctions",
+    matching.extract_junctions({
+        "location_description": "M6 southbound Junction 31 to Junction 30",
+        "comment": "Diversion via A50, rejoin motorway at Junction 24",
+    }) == [31, 30],
+)
+check(
+    "spelled-out 'Junction 40 to 39' (second number has no prefix)",
+    matching._junctions_in_text("Junctions 40 to 39") == [40, 39],
+)
+check(
+    "'conjunction' does not false-positive match",
+    matching._junctions_in_text("Roadworks in conjunction with utility company") == [],
+)
+
+section("matching: closure_matches_leg")
+
+m6_closure = {
+    "road_name": "M6", "direction": "southBound",
+    "location_description": "M6 southbound between J40 and J39",
+}
+check("matches correct road/direction/range", matching.closure_matches_leg(m6_closure, "M6", "southBound", 45, 26))
+check("direction comparison is case-insensitive", matching.closure_matches_leg(m6_closure, "M6", "SOUTHBOUND", 45, 26))
+check("rejects wrong road", not matching.closure_matches_leg(m6_closure, "M1", "southBound", 45, 26))
+check("rejects out-of-range junction", not matching.closure_matches_leg(m6_closure, "M6", "southBound", 10, 20))
+check(
+    "entire-road leg (no junction filter) matches regardless of junction",
+    matching.closure_matches_leg(m6_closure, "M6", "southBound", None, None),
+)
+
+section("matching: leg_direction_sort_key ordering (real M6 data pattern)")
+
+closures = [
+    {"road_name": "M6", "direction": "southBound", "location_description": "M6 southbound between J30 and J29", "start_datetime": "2026-08-25T00:00:00"},
+    {"road_name": "M6", "direction": "southBound", "location_description": "M6 southbound between J45 and J44", "start_datetime": "2026-08-30T00:00:00"},
+    {"road_name": "M6", "direction": "southBound", "location_description": "M6 southbound between J27 and J26", "start_datetime": "2026-08-15T00:00:00"},
+]
+rows = matching.rows_for_leg(closures, "M6", "southBound", 45, 26)
+check(
+    "descending order (45 -> 26) regardless of start_datetime",
+    [r["location"] for r in rows] == [
+        "M6 southbound between J45 and J44",
+        "M6 southbound between J30 and J29",
+        "M6 southbound between J27 and J26",
+    ],
+)
+
+section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
+
+gretna_style = {
+    "road_name": "M74", "direction": "Northbound",
+    "location_description": "M74 (Gretna Nth Slip) to M74 (Off Slip), Northbound \u2014 Road Closure.",
+    "comment": "Works: Lining | Traffic Management: Road Closure. | Diversion: Leave the motorway at J22",
+    "start_datetime": "2026-08-25T20:00:00", "end_datetime": "",
+    "validity_status": "planned", "cause_type": "Lining Works",
+    "lanes_restricted": None, "lanes_operational": None, "source_label": "test",
+}
+rows = matching.rows_for_leg([gretna_style], "M74", "Northbound", 22, 8)
+check("matched via comment fallback", len(rows) == 1)
+check("'near J22' annotation added since location itself has no junction", "near J22" in rows[0]["location"])
+
+section("matching: cross-check dedup by record_id")
+
+dup_a = {"record_id": "X", "road_name": "M6", "direction": "southBound", "location_description": "M6 southbound J10", "start_datetime": "2026-01-01T00:00:00"}
+dup_b = {"record_id": "X", "road_name": "M6", "direction": "southBound", "location_description": "M6 southbound J10 to J11", "start_datetime": "2026-01-01T00:00:00"}
+rows = matching.rows_for_leg([dup_a, dup_b], "M6", "southBound", 1, 20)
+check("multiple segments sharing record_id collapse to one row", len(rows) == 1)
+
+
+# =======================================================================
+# sources/national_highways.py
+# =======================================================================
+
+section("national_highways: normalize_datex_response (synthetic DATEX II payload)")
+
+synthetic_payload = {
+    "D2Payload": {
+        "situation": [{
+            "situationRecord": [{
+                "sitRoadOrCarriagewayOrLaneManagement": {
+                    "idG": "test-001",
+                    "validity": {
+                        "validityStatus": "active",
+                        "validityTimeSpecification": {
+                            "overallStartTime": "2026-08-20T08:00:00.00Z",
+                            "overallEndTime": "2026-08-21T09:00:00.00Z",
+                        },
+                    },
+                    "cause": {"causeType": "roadMaintenance"},
+                    "generalPublicComment": [{"comment": "M6 J40 to J39 lane closure"}],
+                    "locationReference": {"locLocationGroupByList": {"locationContainedInGroup": [{
+                        "locLinearLocation": {"supplementaryPositionalDescription": {
+                            "locationDescription": "M6 southbound between J40 and J39",
+                            "carriageway": [{"carriagewayExtensionG": {"impactOnCarriageway": {
+                                "numberOfLanesRestricted": 1, "numberOfOperationalLanes": 2,
+                            }}}],
+                        }},
+                        "locSingleRoadLinearLocation": {"linearWithinLinearElement": [{
+                            "directionOnLinearSection": "southBound",
+                            "linearElement": {"locLinearElementByCode": {"roadName": "M6"}},
+                        }]},
+                    }]}},
+                },
+            }],
+        }],
+    },
+}
+flat = nh.normalize_datex_response(synthetic_payload)
+check("one flat record produced", len(flat) == 1)
+check("road_name extracted", flat[0]["road_name"] == "M6")
+check("direction extracted", flat[0]["direction"] == "southBound")
+check("lanes extracted", flat[0]["lanes_restricted"] == 1 and flat[0]["lanes_operational"] == 2)
+check("record_id from idG", flat[0]["record_id"] == "test-001")
+
+section("national_highways: find_next_page_url")
+
+check("finds Link header rel=next", nh.find_next_page_url(
+    {}, {"Link": '<https://api.example.com/closures?page=2>; rel="next"'}
+) == "https://api.example.com/closures?page=2")
+check("finds JSON nextLink field", nh.find_next_page_url({"nextLink": "https://x/2"}, {}) == "https://x/2")
+check("no pagination signal -> None", nh.find_next_page_url({"D2Payload": {}}, {}) is None)
+
+
+# =======================================================================
+# sources/xlsx_advance_notice.py
+# =======================================================================
+
+section("xlsx_advance_notice: header row detection with a title row above it")
+
+rows_with_title = [
+    ("7 Day Closure Report -- Saturday",),  # title row
+    ("Road Number", "Direction", "Location", "Scheduled Start Time", "Scheduled End Time", "Closure Details Including Diversions"),
+    ("M6", "Southbound", "J40 to J39", "2026-08-20", "2026-08-21", "Full closure"),
+]
+header_idx, col_map = xlsx.find_header_row(rows_with_title)
+check("finds header on row 2 (index 1), not row 1", header_idx == 1)
+check("maps 'Road Number' -> road_name", "road_name" in col_map)
+check("maps 'Scheduled Start Time' -> start_datetime", "start_datetime" in col_map)
+
+section("xlsx_advance_notice: unrecognized schema -> graceful no-match")
+
+header_idx, col_map = xlsx.find_header_row([("Foo", "Bar", "Baz")] * 8)
+check("no header found for unrelated columns", header_idx is None)
+
+
+# =======================================================================
+# sources/traffic_scotland.py
+# =======================================================================
+
+section("traffic_scotland: date parsing (real formats from live fetches)")
+
+for text, expected in [
+    ("20th of July 2026, 8:00pm", "2026-07-20T20:00:00"),
+    ("18th of September 2026, 6:00am", "2026-09-18T06:00:00"),
+    ("1st of January 2025, 6:00am", "2025-01-01T06:00:00"),
+]:
+    check(f"{text!r} -> {expected}", scot.parse_scottish_datetime(text) == expected)
+
+section("traffic_scotland: M74/A74(M) alias matching survives \\b-after-paren bug")
+
+# \b fails right after "A74(M)"'s closing paren since both ")" and the
+# following space are non-word chars -- lookarounds fix this
+check(
+    "A74(M) title matches via lookaround (not \\b)",
+    bool(scot.LISTING_ROAD_TOKEN_RE.findall("A74(M) (Jct 15 to Jct 16), Northbound")),
+)
+
+section("traffic_scotland: stage 1 entry discovery (real listing page content)")
+
+real_listing_html = """
+<html><body>
+<div class="views-row">
+<h2>A701 SB from A74M Road Part of A Diversion Route</h2>
+<p>Location:A701 (Start Beattock East Rbt) to M74 (A701 Moffat Rbt), Southbound</p>
+<p>Start time:14th of August 2026, 7:00pm</p>
+<p>Description:Works:<br>Road Part of a Diversion Route</p>
+<a href="https://www.traffic.gov.scot/more-details?sid=cSW202669539&type=roadworks">More details</a>
+</div>
+<div class="views-row">
+<h2>M74 J8 - J9 SB - Lane Closures</h2>
+<p>Location:M74 (J8 Off Slip to J9 On Slip), Southbound</p>
+<p>Start time:20th of July 2026, 8:00pm</p>
+<p>Description:Works:<br>Barrier Repair</p>
+<a href="https://www.traffic.gov.scot/more-details?sid=cSW202669759&type=roadworks">More details</a>
+</div>
+<div class="views-row">
+<h2>A75 Gatehouse of Fleet Bypass EB - Lane closure</h2>
+<p>Location:A75 (Climbing Lane End to B796), Eastbound</p>
+<p>Start time:20th of July 2026, 9:00am</p>
+<p>Description:Works:<br>Drainage Works</p>
+<a href="https://www.traffic.gov.scot/more-details?sid=cSW202669373&type=roadworks">More details</a>
+</div>
+</body></html>
+"""
+entries = scot.find_road_entries(real_listing_html, scot.ROAD_ALIASES["M74"])
+check("finds 2 (A701/M74 diversion mention + real M74 entry)", len(entries) == 2)
+check("A75 correctly excluded", not any("A75" in e["location_text"] for e in entries))
+
+section("traffic_scotland: stage 2 detail page parsing (real captured data)")
+
+real_detail_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M74 J8 - J9 SB - Lane Closures
+Direction
+Southbound
+Starting
+20th of July 2026, 8:00pm
+Ending
+18th of September 2026, 6:00am
+Roadwork description
+Works:
+Barrier Repair, Filter Drain
+Traffic Management:
+Lane Closure (40mph)
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+entries = scot.parse_detail_page(
+    real_detail_html, "https://www.traffic.gov.scot/more-details?sid=cSW202669759&type=roadworks",
+)
+check("single fallback row (no Activity Periods)", len(entries) == 1)
+check("location matches real page", entries[0]["location_description"] == "M74 J8 - J9 SB - Lane Closures")
+check("real end date captured", entries[0]["end_datetime"] == "2026-09-18T06:00:00")
+
+section("traffic_scotland: Activity Periods parsing + midnight merge (real data)")
+
+days_times_text = """
+Week commencing 17th Aug
+Activity PeriodsExpand
+- Thu 20th Aug - 22:00 to 23:59
+- Fri 21st Aug - 00:00 to 06:00
+"""
+raw = scot.parse_activity_periods(days_times_text, "2026-08-02T22:00:00", "2026-09-04T06:00:00")
+check("finds 2 raw periods", len(raw) == 2)
+merged = scot.merge_adjacent_periods(raw)
+check("merges into one period across the midnight boundary", len(merged) == 1)
+check("merged span is Thu 22:00 -> Fri 06:00", merged[0] == ("2026-08-20T22:00:00", "2026-08-21T06:00:00"))
+
+section("traffic_scotland: cross-road ambiguity guard (real rogue M8/M74 example)")
+
+rogue_listing_html = """
+<html><body><div class="views-row">
+<h2>M8/M74 Interchange Closure</h2>
+<p>Location:M8 (Slip Off M8 Wb) to M74 (Interchange), Southbound</p>
+<p>Start time:25th of August 2026, 8:00pm</p>
+<p>Description:Works:<br>Grass Cutting</p>
+<a href="https://www.traffic.gov.scot/more-details?sid=cROGUE&type=roadworks">More details</a>
+</div></body></html>
+"""
+rogue_detail_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M8/M74 Interchange - Southbound
+Direction
+Southbound
+Starting
+25th of August 2026, 8:00pm
+Ending
+26th of August 2026, 6:00am
+Roadwork description
+Works:
+Grass Cutting
+Traffic Management:
+Road Closure. Diversion via jct 21 and jct 23
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+
+
+def fake_fetch_text(url, headers=None):
+    if "planned-roadworks" in url:
+        return "<html><body>none</body></html>"
+    if "sid=cROGUE" in url:
+        return rogue_detail_html
+    if "more-details" not in url:
+        return rogue_listing_html
+    raise AssertionError(f"unexpected URL in test: {url}")
+
+
+_original_fetch_text = scot.fetch_text
+scot.fetch_text = fake_fetch_text
+try:
+    results = scot.fetch_from_traffic_scotland("M74")
+finally:
+    scot.fetch_text = _original_fetch_text
+
+check(
+    "rogue M8/M74 entry (M8's junctions, not M74's) is excluded",
+    len(results) == 0,
+)
+
+
+# =======================================================================
+print(f"\n{'=' * 60}")
+if FAILURES:
+    print(f"{FAILURES} test(s) FAILED")
+    sys.exit(1)
+print("All tests passed.")

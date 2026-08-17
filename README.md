@@ -11,11 +11,46 @@ with GitHub Pages.
 
 1. `routes.yaml` -- you define your routes here: road name, junction range,
    and direction for each leg of each route, plus which data source to use.
-2. `build.py` -- fetches closures (from the live National Highways API or a
-   flat JSON mirror, see below), filters them per leg, and renders static
-   HTML into `_site/`.
+2. `build.py` -- orchestration only: loads `routes.yaml`, calls each
+   configured source, matches closures to routes, and renders `_site/`.
+   The actual data-fetching logic lives in `sources/` (one module per
+   source), and the shared route/leg matching logic lives in `matching.py`
+   -- see "Project structure" below.
 3. `.github/workflows/build-deploy.yml` -- runs `build.py` on a schedule
    (default: every 10 minutes) and publishes `_site/` to GitHub Pages.
+
+## Project structure
+
+```
+build.py                        orchestration: load config, call sources, render templates
+matching.py                     shared route/leg matching (junction extraction, sorting, filtering)
+sources/
+  national_highways.py          live API + flat JSON mirror
+  xlsx_advance_notice.py        National Highways advance-notice spreadsheet
+  traffic_scotland.py           Traffic Scotland scraper (M74)
+test_build.py                   test suite for matching.py + all three sources
+routes.yaml                     route/leg definitions + data source config
+templates/, static/             Jinja templates and the day-filter JS/CSS
+```
+
+Each source module exposes a `fetch_*(...) -> list[dict]` function that
+returns closures in one common flat shape (`road_name`, `direction`,
+`location_description`, `comment`, `start_datetime`, `end_datetime`,
+`validity_status`, `cause_type`, `lanes_restricted`, `lanes_operational`,
+`source_label`, `record_id`) -- everything downstream in `matching.py`
+works identically regardless of which source a closure came from. Adding
+a new source later means adding a new module here, not editing the
+others.
+
+### Running the tests
+
+```bash
+python test_build.py
+```
+
+Covers `matching.py`'s junction extraction/sorting/leg-matching, and each
+source module -- several tests use real page/API content captured from
+live fetches rather than synthetic data (noted in the test names).
 
 ## Data source: the live National Highways API (default)
 
