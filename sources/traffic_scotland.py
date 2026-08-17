@@ -161,6 +161,39 @@ def canonical_road(token: str) -> str:
     return token_upper
 
 
+def isolate_road_segment(text: str, target_aliases: set[str]) -> str:
+    """When text describes more than one road (e.g. "M8 (Sec C/Way Jct
+    22) to M74 SB (Sec C/Way Jct 3a)"), return just the portion
+    describing our target road, so a coincidental junction number
+    belonging to a DIFFERENT road (e.g. the M8's own "Jct 22") can't be
+    mistaken for one of ours purely because both numbers appear together
+    in one combined string -- seen in practice: an M8/M74 interchange
+    entry where the M8's "Jct 22" happened to fall inside the M74 leg's
+    configured J8-22 range, incorrectly matching a closure that's
+    actually describing M74's own (out-of-range) Junction 3A.
+
+    Splits the text at every road-token occurrence (any road, not just
+    the target) and keeps only the segment(s) starting at a target-road
+    token, up to the next DIFFERENT road's token or the end of the
+    string. Returns the text unchanged if it only mentions one road (or
+    none), so the common single-road case is untouched."""
+    occurrences = [(m.start(), m.group(1).upper()) for m in ROAD_TOKEN_RE.finditer(text)]
+    if len(occurrences) <= 1:
+        return text
+
+    target_upper = {a.upper() for a in target_aliases}
+    segments = []
+    for i, (pos, token) in enumerate(occurrences):
+        if token not in target_upper:
+            continue
+        end = occurrences[i + 1][0] if i + 1 < len(occurrences) else len(text)
+        segments.append(text[pos:end].strip())
+
+    if not segments:
+        return text  # target road wasn't actually a token here -- leave unchanged
+    return " / ".join(segments)
+
+
 def find_road_entries(html: str, aliases: set[str]) -> list[dict]:
     """Stage 1: find each entry block on a listing page whose Location
     field mentions one of the given road aliases (e.g. M74 or A74(M)),
@@ -570,19 +603,31 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
 
         # Cross-road ambiguity guard: if the listing's location text (the
         # original context this entry was found in) mentions more than
-        # one distinct road, and the DETAIL page's own clean location
-        # text has no junction number of its own, skip rather than risk
-        # matching on a junction that belongs to the other road (real
-        # case seen in practice: an M8/M74 closure whose diversion
-        # mentioned M8's own junctions 21/23, which happened to fall
-        # inside the M74 leg's range). Checked once per detail page since
-        # every period from it shares the same location_description.
+        # one distinct road, isolate just our target road's own segment
+        # before checking for a junction number -- otherwise a
+        # coincidental junction belonging to the OTHER road can slip
+        # through and incorrectly satisfy our leg's configured range
+        # (real case seen in practice: an M8/M74 interchange entry where
+        # the M8's own "Jct 22" happened to fall inside the M74 leg's
+        # J8-22 range, even though the closure itself was actually
+        # describing M74's own out-of-range Junction 3A). If, after
+        # isolating our own segment, there's still no junction number to
+        # go on, skip rather than guess. Checked once per detail page
+        # since every period from it shares the same location_description.
         location_description = entries[0]["location_description"]
         tokens = {t.upper() for t in extract_road_tokens(
             f"{listing_location_text} {location_description}"
         )}
         distinct_roads = {canonical_road(t) for t in tokens}
         is_cross_road = len(distinct_roads) > 1
+
+        if is_cross_road:
+            isolated = isolate_road_segment(location_description, aliases)
+            if isolated != location_description:
+                for entry in entries:
+                    entry["location_description"] = isolated
+                location_description = isolated
+
         if is_cross_road and not _junctions_in_text(location_description):
             skipped_ambiguous += 1
             continue
