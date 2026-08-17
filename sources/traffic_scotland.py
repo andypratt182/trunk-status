@@ -48,6 +48,7 @@ import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from matching import _junctions_in_text
 
@@ -472,6 +473,43 @@ def parse_detail_page(html: str, href: str) -> list[dict]:
     }]
 
 
+def compute_validity_status(start_iso: str, end_iso: str, now: datetime, fallback: str) -> str:
+    """Traffic Scotland's own current/planned split is just which listing
+    page an entry appeared on -- not date-aware, and can be stale between
+    rebuilds (a closure found on the "current" page stays labeled active
+    forever if we don't check the real dates). Since entries here carry
+    precise start/end times (especially after Activity Period expansion),
+    compute the real status instead: 'active' only while `now` actually
+    falls within [start, end], 'planned' otherwise.
+
+    If `end` is missing or unparseable but `start` isn't, compare against
+    `start` alone (active once it's begun, planned before) rather than
+    falling back to the static per-page label -- a closure that's clearly
+    already started shouldn't keep showing "planned", and one whose end
+    date we just don't have shouldn't be stuck showing whatever label its
+    listing page happened to give it. Only falls back to `fallback` when
+    even `start` is missing/unparseable, since there's nothing real left
+    to compare against at that point."""
+    start = None
+    end = None
+    if start_iso:
+        try:
+            start = datetime.fromisoformat(start_iso)
+        except ValueError:
+            start = None
+    if end_iso:
+        try:
+            end = datetime.fromisoformat(end_iso)
+        except ValueError:
+            end = None
+
+    if start and end:
+        return "active" if start <= now <= end else "planned"
+    if start:
+        return "active" if now >= start else "planned"
+    return fallback
+
+
 def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
     aliases = ROAD_ALIASES.get(road_name, {road_name})
     pages = [
@@ -504,6 +542,11 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
 
     print(f"Fetching detail pages for {len(found)} matched entr"
           f"{'y' if len(found) == 1 else 'ies'} ...")
+
+    # Naive UK-local "now" to compare against the (also naive, assumed
+    # UK-local) start/end times stored on each entry -- see
+    # compute_validity_status().
+    now = datetime.now(ZoneInfo("Europe/London")).replace(tzinfo=None)
 
     results = []
     skipped_ambiguous = 0
@@ -546,7 +589,9 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
 
         for entry in entries:
             entry["road_name"] = road_name
-            entry["validity_status"] = status
+            entry["validity_status"] = compute_validity_status(
+                entry["start_datetime"], entry["end_datetime"], now, fallback=status
+            )
             entry["lanes_restricted"] = None
             entry["lanes_operational"] = None
             entry["source_label"] = "Traffic Scotland (scraped)"
