@@ -85,6 +85,19 @@
     if (isNaN(start.getTime())) return false;
     const endParsed = endAttr ? new Date(endAttr) : start;
     const end = isNaN(endParsed.getTime()) ? start : endParsed;
+
+    // A closure that's already fully ended shouldn't show under any
+    // specific-day filter (Today, Tomorrow, ...), even if its window
+    // technically touched that calendar day -- e.g. one running 22:00
+    // yesterday to 06:00 today did overlap "today" by calendar date, but
+    // by mid-morning it's simply over and no longer relevant to show
+    // under a "what's happening today" view. This only ever affects
+    // "Today" in practice, since every other day option is entirely in
+    // the future by construction and can't already have ended. "All" is
+    // untouched -- it's the explicit "show me everything" view and never
+    // calls this function (see resolveRange's dayStart === null check).
+    if (end < new Date()) return false;
+
     return start < dayEnd && end >= dayStart;
   }
 
