@@ -108,11 +108,31 @@ Notes on this data source:
   returns an HTTP 500 if you exceed it -- and its own default window is
   much narrower still (effectively "today") if no date range is given at
   all, so this is set explicitly to make sure upcoming roadworks show up.
-- Rate limit: 10 calls/minute per key. This build makes 1 call per run,
-  so this is not a concern even at a frequent rebuild schedule.
+- **`closureType`: "both" is fetched as two explicit requests, not by
+  omitting the parameter.** Omitting `closureType` was originally assumed
+  to mean "both planned and unplanned" (per this API's apparent design),
+  but that assumption was never verified against a live response -- and
+  turned out to be wrong. A real run with `closure_type: null` returned
+  only `roadMaintenance`/`constructionWork`/`authorityOperation` causes
+  across 3,201 records, with zero incident-flavoured ones, which is
+  extremely unlikely if "both" were genuinely being returned across a
+  live network that size over a 29-day window. `closure_type: null` now
+  makes two separate requests (`closureType=planned` and
+  `closureType=unplanned`) and merges the results, rather than trusting
+  an unverified default. Setting `closure_type` to an explicit single
+  value still makes just one request, unchanged.
+- Rate limit: 10 calls/minute per key. This build makes 1 or 2 calls per
+  run depending on `closure_type` (2 when left as `null`/"both"), so this
+  is not a concern even at a frequent rebuild schedule.
 - Known data limitation (per National Highways' own docs): closures are
   only reported where physical signs/signals (VSS) are actively set on
   the network, so some real-world closures may not appear.
+- `sources/national_highways.py`'s `UNPLANNED_CAUSE_KEYWORDS`/`looks_unplanned()`
+  print a `cause_type` breakdown to the build log every run, flagging
+  anything that looks incident-like by keyword. This is a best-effort
+  guess pending real confirmation of the actual `cause_type` values used
+  for unplanned closures -- useful for deciding whether it's worth adding
+  a visual "Incident" distinction on the site once real values are seen.
 
 ## Data source: flat JSON mirror (alternative, no API key)
 

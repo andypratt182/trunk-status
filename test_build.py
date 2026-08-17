@@ -13,6 +13,7 @@ building each source) rather than synthetic data, noted per test.
 """
 from __future__ import annotations
 
+import os
 import sys
 import urllib.error
 
@@ -186,6 +187,72 @@ check("road_name extracted", flat[0]["road_name"] == "M6")
 check("direction extracted", flat[0]["direction"] == "southBound")
 check("lanes extracted", flat[0]["lanes_restricted"] == 1 and flat[0]["lanes_operational"] == 2)
 check("record_id from idG", flat[0]["record_id"] == "test-001")
+
+section("national_highways: fetch_from_national_highways_api fetches BOTH closureTypes explicitly")
+
+_nh_test_calls = []
+
+
+def _make_nh_record(idx, cause_type):
+    return {"sitRoadOrCarriagewayOrLaneManagement": {
+        "idG": f"test-{idx}", "validity": {"validityStatus": "active", "validityTimeSpecification": {
+            "overallStartTime": "2026-08-20T08:00:00Z", "overallEndTime": "2026-08-21T08:00:00Z"}},
+        "cause": {"causeType": cause_type}, "generalPublicComment": [{"comment": "test"}],
+        "locationReference": {"locLocationGroupByList": {"locationContainedInGroup": [{
+            "locLinearLocation": {"supplementaryPositionalDescription": {"locationDescription": "M6", "carriageway": []}},
+            "locSingleRoadLinearLocation": {"linearWithinLinearElement": [{
+                "directionOnLinearSection": "southBound",
+                "linearElement": {"locLinearElementByCode": {"roadName": "M6"}}}]},
+        }]}},
+    }}
+
+
+_nh_planned_payload = {"D2Payload": {"situation": [{"situationRecord": [
+    _make_nh_record(1, "roadMaintenance"), _make_nh_record(2, "constructionWork"),
+]}]}}
+_nh_unplanned_payload = {"D2Payload": {"situation": [{"situationRecord": [
+    _make_nh_record(3, "vehicleAccident"),
+]}]}}
+
+
+def _fake_nh_fetch_json(url, headers=None):
+    _nh_test_calls.append(url)
+    if "closureType=unplanned" in url:
+        return _nh_unplanned_payload, {}
+    if "closureType=planned" in url:
+        return _nh_planned_payload, {}
+    raise AssertionError(f"unexpected URL with no closureType: {url}")
+
+
+os.environ["NATIONAL_HIGHWAYS_API_KEY"] = "fake-test-key-for-tests"
+_original_nh_fetch_json = nh.fetch_json
+nh.fetch_json = _fake_nh_fetch_json
+try:
+    nh_closures = nh.fetch_from_national_highways_api({"lookahead_days": 7})
+finally:
+    nh.fetch_json = _original_nh_fetch_json
+
+check("closure_type left unset -> exactly 2 calls made (planned + unplanned explicitly)",
+      len(_nh_test_calls) == 2)
+check("one call used closureType=planned, the other closureType=unplanned",
+      any("closureType=planned" in u for u in _nh_test_calls)
+      and any("closureType=unplanned" in u for u in _nh_test_calls))
+check("results from both calls are merged, including the incident record",
+      len(nh_closures) == 3 and any(c["cause_type"] == "vehicleAccident" for c in nh_closures))
+
+_nh_test_calls.clear()
+nh.fetch_json = _fake_nh_fetch_json
+try:
+    nh_closures_explicit = nh.fetch_from_national_highways_api(
+        {"lookahead_days": 7, "closure_type": "planned"}
+    )
+finally:
+    nh.fetch_json = _original_nh_fetch_json
+
+check("closure_type explicitly set to 'planned' -> only 1 call made (unchanged behavior)",
+      len(_nh_test_calls) == 1 and "closureType=planned" in _nh_test_calls[0])
+check("only the planned records are returned", len(nh_closures_explicit) == 2)
+
 
 section("national_highways: looks_unplanned (cause_type incident-keyword heuristic)")
 

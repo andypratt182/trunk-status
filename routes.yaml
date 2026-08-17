@@ -34,7 +34,8 @@ site:
   # or export it locally before running build.py.
   source: "national_highways_api"
   api_base_url: "https://api.data.nationalhighways.co.uk"
-  closure_type: null          # "planned", "unplanned", or null for both
+  closure_type: null          # "planned", "unplanned", or null for both (fetched as
+                               # two separate requests -- see sources/national_highways.py)
   lookahead_days: 29          # how far ahead to fetch closures for (API max: 30)
 
   # --- Alternative: a pre-flattened JSON mirror (no API key needed) ---
