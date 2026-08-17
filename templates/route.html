@@ -63,7 +63,9 @@
             {% endif %}
           </td>
           <td class="lanes-cell">
-            {% if row.lanes_restricted is not none %}
+            {% if row.lane_info %}
+              {{ row.lane_info }}
+            {% elif row.lanes_restricted is not none %}
               {{ row.lanes_restricted }} restricted
               {% if row.lanes_operational is not none %}/ {{ row.lanes_operational }} open{% endif %}
             {% elif row.lanes_operational == 0 %}
