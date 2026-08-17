@@ -49,6 +49,16 @@ XLSX_HEADER_SYNONYMS: dict[str, set[str]] = {
 # some sheets have a title row above the real column headers.
 MAX_HEADER_SCAN_ROWS = 6
 
+# Real data only ever uses 6 columns (Road number, Direction, Location,
+# Scheduled start/end time, Closure details), but a sheet can report a
+# much wider "used" range than that -- openpyxl reports it out to
+# wherever cell formatting was ever applied, even to cells nobody put
+# data in (seen on a live sheet: hundreds of extra reported columns with
+# no content). Reading all of those for every row is real overhead, not
+# just noisy logging, so this bounds how many columns are actually read.
+# Generous headroom beyond the known 6 in case a future column is added.
+MAX_COLUMNS_TO_READ = 20
+
 
 def normalize_header(value) -> str:
     return re.sub(r"[^a-z0-9]", "", str(value or "").lower())
@@ -80,6 +90,20 @@ def find_header_row(rows: list[tuple]) -> tuple[int, dict[str, int]] | tuple[Non
     return None, None
 
 
+def trim_trailing_empty(row: tuple) -> tuple:
+    """Drop trailing None/empty cells for cleaner logging. Some sheets
+    report far more "used" columns than actually contain data -- openpyxl
+    reports a sheet's used range out to wherever cell formatting was ever
+    applied, even to cells that were never filled in, so iter_rows() can
+    return a row padded with hundreds of Nones past the real content.
+    This only affects what gets printed, not parsing (which still uses
+    the full row and looks up columns by index via col_map)."""
+    row = list(row)
+    while row and row[-1] is None:
+        row.pop()
+    return tuple(row)
+
+
 def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
     try:
         import openpyxl
@@ -108,19 +132,20 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows = list(ws.iter_rows(values_only=True))
+        rows = list(ws.iter_rows(max_col=MAX_COLUMNS_TO_READ, values_only=True))
         if not rows:
             continue  # empty sheet
 
         header_idx, col_map = find_header_row(rows)
         if header_idx is None:
-            preview = rows[0] if rows else ()
+            preview = trim_trailing_empty(rows[0]) if rows else ()
             print(f"  sheet '{sheet_name}': no recognizable 'road' column in the "
                   f"first {MAX_HEADER_SCAN_ROWS} rows -- skipping this sheet "
                   f"(first row: {preview}).")
             continue
 
-        print(f"  sheet '{sheet_name}' headers (row {header_idx + 1}): {rows[header_idx]}")
+        print(f"  sheet '{sheet_name}' headers (row {header_idx + 1}): "
+              f"{trim_trailing_empty(rows[header_idx])}")
 
         def get(row, field):
             idx = col_map.get(field)
