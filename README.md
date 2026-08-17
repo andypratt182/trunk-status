@@ -134,10 +134,24 @@ pages instead, in two stages:
    Location (often has an explicit junction range, e.g. "M74 J8 - J9 SB"),
    Direction, Starting, Ending, and a Roadwork description (Works: /
    Traffic Management: / sometimes Diversion Information:). Critically,
-   this is the only place
-   a real **end date** is available — the listing pages never showed one.
+   this is the only place a real **end date** is available — the listing
+   pages never showed one.
 
 Rows show as "Traffic Scotland (scraped)" in the Source column.
+
+**Activity Periods — expanded into individual rows, not one misleading
+block.** Some closures also publish a "Days & times affected" section
+giving the *exact* overnight windows they're actually active (e.g. "Thu
+20th Aug - 22:00 to 23:59"), while their overall Starting/Ending dates
+can span many weeks — the road usually isn't closed continuously for
+that whole span, only on specific nights within it. When present,
+`scotland_parse_detail_page()` returns **one row per actual closure
+window** instead of a single row spanning the misleading overall range.
+Periods either side of midnight (e.g. "22:00 to 23:59" then "00:00 to
+06:00" the next day) are merged into one continuous window, since
+that's how the site publishes an overnight closure — as two grid cells
+a minute apart, not one line. Closures with no such section fall back
+to a single row using the overall Starting/Ending, same as before.
 
 **The M74/A74(M) alias**: the same physical road is signed "A74(M)" on
 its southern stretch near the Scotland/England border, becoming "M74"

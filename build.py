@@ -499,6 +499,10 @@ SCOTLAND_DATE_RE = re.compile(
 SCOTLAND_MONTHS = {name.lower(): i for i, name in enumerate(
     ["January", "February", "March", "April", "May", "June", "July",
      "August", "September", "October", "November", "December"], start=1)}
+# Activity Period lines use abbreviated month names ("Aug"), while
+# Starting/Ending use full names ("August") -- this lookup handles both
+# by matching on the first three letters either way.
+SCOTLAND_MONTH_ABBR = {name[:3]: num for name, num in SCOTLAND_MONTHS.items()}
 
 # Detail page field labels, in the order they appear. scotland_scan_
 # labeled_fields() slices the page's text between consecutive labels
@@ -510,6 +514,17 @@ SCOTLAND_DETAIL_LABELS = [
     "Works:", "Traffic Management:", "Diversion Information:",
     "Did you find",
 ]
+
+# Within "Days & times affected", an expandable "Activity Periods" list
+# gives the exact overnight windows a closure is actually active, e.g.
+# "Thu 20th Aug - 22:00 to 23:59". The overall Starting/Ending span can
+# cover many weeks while the road is only actually closed on specific
+# nights within it -- these lines are the ground truth for that.
+SCOTLAND_ACTIVITY_PERIOD_RE = re.compile(
+    r'(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+(\d{1,2})\w{0,2}\s+([A-Za-z]+)\s*-\s*'
+    r'(\d{1,2}):(\d{2})\s*to\s*(\d{1,2}):(\d{2})',
+    re.IGNORECASE,
+)
 
 
 # The road token at the start of a location segment on the LISTING page,
@@ -658,15 +673,104 @@ def scotland_scan_labeled_fields(text: str) -> dict[str, str]:
     return fields
 
 
-def scotland_parse_detail_page(html: str, href: str) -> dict | None:
-    """Stage 2: parse one entry's detail page into a closure dict (still
-    missing road_name/validity_status/source_label -- the caller fills
-    those in, since this function doesn't know which listing page or
-    road search found it)."""
+def scotland_parse_activity_periods(text: str, reference_start: str,
+                                     reference_end: str) -> list[tuple[str, str]]:
+    """Parse 'Thu 20th Aug - 22:00 to 23:59' style lines out of the "Days
+    & times affected" field text into (start_iso, end_iso) tuples. The
+    year isn't given on each line, so it's inferred by picking whichever
+    of the overall Starting/Ending years places the resulting date within
+    (or close to) that overall range -- these periods should always fall
+    inside it. Falls back to the earlier of the two years if neither
+    placement works out (e.g. malformed reference dates)."""
+    ref_start_dt = None
+    ref_end_dt = None
+    try:
+        if reference_start:
+            ref_start_dt = datetime.fromisoformat(reference_start)
+        if reference_end:
+            ref_end_dt = datetime.fromisoformat(reference_end)
+    except ValueError:
+        pass
+
+    candidate_years = sorted({dt.year for dt in (ref_start_dt, ref_end_dt) if dt} or {datetime.now().year})
+
+    periods = []
+    for m in SCOTLAND_ACTIVITY_PERIOD_RE.finditer(text):
+        day_str, month_name, sh, sm, eh, em = m.groups()
+        month = SCOTLAND_MONTH_ABBR.get(month_name.lower()[:3])
+        if not month:
+            continue
+        day = int(day_str)
+
+        chosen_start = None
+        for year in candidate_years:
+            try:
+                candidate = datetime(year, month, day, int(sh), int(sm))
+            except ValueError:
+                continue
+            if ref_start_dt and ref_end_dt:
+                if (ref_start_dt - timedelta(days=1)) <= candidate <= (ref_end_dt + timedelta(days=1)):
+                    chosen_start = candidate
+                    break
+            else:
+                chosen_start = candidate
+                break
+        if chosen_start is None:
+            try:
+                chosen_start = datetime(candidate_years[0], month, day, int(sh), int(sm))
+            except ValueError:
+                continue
+
+        end_dt = chosen_start.replace(hour=int(eh), minute=int(em))
+        if end_dt <= chosen_start:
+            end_dt += timedelta(days=1)  # end time wraps past midnight within one line
+
+        periods.append((chosen_start.isoformat(), end_dt.isoformat()))
+
+    return periods
+
+
+def scotland_merge_adjacent_periods(periods: list[tuple[str, str]],
+                                     gap_tolerance_minutes: int = 5) -> list[tuple[str, str]]:
+    """Merge periods that abut across a midnight split -- e.g. "22:00 to
+    23:59" followed by "00:00 to 06:00" the next calendar day become one
+    "22:00 to 06:00" period, since that's how these are actually
+    published (as two grid cells either side of midnight, one minute
+    apart) rather than as a single overnight line."""
+    if not periods:
+        return []
+
+    parsed = sorted(
+        ((datetime.fromisoformat(s), datetime.fromisoformat(e)) for s, e in periods),
+        key=lambda p: p[0],
+    )
+    merged = [list(parsed[0])]
+    for start, end in parsed[1:]:
+        last_start, last_end = merged[-1]
+        if (start - last_end) <= timedelta(minutes=gap_tolerance_minutes):
+            merged[-1][1] = max(last_end, end)
+        else:
+            merged.append([start, end])
+
+    return [(s.isoformat(), e.isoformat()) for s, e in merged]
+
+
+def scotland_parse_detail_page(html: str, href: str) -> list[dict]:
+    """Stage 2: parse one entry's detail page into one or more closure
+    dicts (still missing road_name/validity_status/source_label -- the
+    caller fills those in). Returns a list because a single detail page
+    can expand into several rows: when "Days & times affected" gives
+    specific overnight Activity Periods (the real ground truth for when
+    the road is actually closed), one row per merged period is returned
+    instead of a single row spanning the overall Starting/Ending range,
+    which can be misleadingly wide (e.g. "5 weeks" when the road is only
+    actually shut a few nights within that span). Falls back to a single
+    row using Starting/Ending when no such periods are found. Returns an
+    empty list if the page's structure didn't match what's expected."""
     try:
         from bs4 import BeautifulSoup
     except ImportError:
-        return None
+        return []
 
     soup = BeautifulSoup(html, "html.parser")
     full_text = soup.get_text("\n", strip=True)
@@ -679,11 +783,12 @@ def scotland_parse_detail_page(html: str, href: str) -> dict | None:
     fields = scotland_scan_labeled_fields(text)
     location = fields.get("Location", "").strip()
     if not location:
-        return None  # page structure didn't match what's expected here
+        return []  # page structure didn't match what's expected here
 
     direction = fields.get("Direction", "").strip()
     start_text = fields.get("Starting", "").strip()
     end_text = fields.get("Ending", "").strip()
+    days_times_text = fields.get("Days & times affected", "")
     works = re.sub(r'\s+', ' ', fields.get("Works:", "")).strip()
     tm = re.sub(r'\s+', ' ', fields.get("Traffic Management:", "")).strip()
     diversion = re.sub(r'\s+', ' ', fields.get("Diversion Information:", "")).strip()
@@ -698,17 +803,38 @@ def scotland_parse_detail_page(html: str, href: str) -> dict | None:
     comment = " | ".join(comment_parts)
 
     sid_match = re.search(r'[?&]sid=([^&]+)', href)
-    record_id = f"scotland-{sid_match.group(1)}" if sid_match else f"scotland-{hash(href)}"
+    base_record_id = f"scotland-{sid_match.group(1)}" if sid_match else f"scotland-{hash(href)}"
 
-    return {
-        "record_id": record_id,
+    overall_start = parse_scottish_datetime(start_text)
+    overall_end = parse_scottish_datetime(end_text)
+
+    shared_fields = {
         "location_description": location,
         "direction": direction,
         "comment": comment,
-        "start_datetime": parse_scottish_datetime(start_text),
-        "end_datetime": parse_scottish_datetime(end_text),
         "cause_type": works,
     }
+
+    raw_periods = scotland_parse_activity_periods(days_times_text, overall_start, overall_end)
+    merged_periods = scotland_merge_adjacent_periods(raw_periods)
+
+    if merged_periods:
+        return [
+            {
+                **shared_fields,
+                "record_id": f"{base_record_id}-p{i + 1}",
+                "start_datetime": period_start,
+                "end_datetime": period_end,
+            }
+            for i, (period_start, period_end) in enumerate(merged_periods)
+        ]
+
+    return [{
+        **shared_fields,
+        "record_id": base_record_id,
+        "start_datetime": overall_start,
+        "end_datetime": overall_end,
+    }]
 
 
 def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
@@ -760,8 +886,8 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
             fetch_failures += 1
             continue
 
-        entry = scotland_parse_detail_page(detail_html, href)
-        if not entry:
+        entries = scotland_parse_detail_page(detail_html, href)
+        if not entries:
             print(f"  Warning: could not parse detail page {href} -- skipping.")
             continue
 
@@ -772,22 +898,25 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
         # matching on a junction that belongs to the other road (real
         # case seen in practice: an M8/M74 closure whose diversion
         # mentioned M8's own junctions 21/23, which happened to fall
-        # inside the M74 leg's range).
+        # inside the M74 leg's range). Checked once per detail page since
+        # every period from it shares the same location_description.
+        location_description = entries[0]["location_description"]
         tokens = {t.upper() for t in scotland_extract_road_tokens(
-            f"{listing_location_text} {entry['location_description']}"
+            f"{listing_location_text} {location_description}"
         )}
         distinct_roads = {scotland_canonical_road(t) for t in tokens}
         is_cross_road = len(distinct_roads) > 1
-        if is_cross_road and not _junctions_in_text(entry["location_description"]):
+        if is_cross_road and not _junctions_in_text(location_description):
             skipped_ambiguous += 1
             continue
 
-        entry["road_name"] = road_name
-        entry["validity_status"] = status
-        entry["lanes_restricted"] = None
-        entry["lanes_operational"] = None
-        entry["source_label"] = "Traffic Scotland (scraped)"
-        results.append(entry)
+        for entry in entries:
+            entry["road_name"] = road_name
+            entry["validity_status"] = status
+            entry["lanes_restricted"] = None
+            entry["lanes_operational"] = None
+            entry["source_label"] = "Traffic Scotland (scraped)"
+            results.append(entry)
 
     if skipped_ambiguous:
         print(f"  skipped {skipped_ambiguous} entr{'y' if skipped_ambiguous == 1 else 'ies'} "
