@@ -100,6 +100,26 @@ check(
     ],
 )
 
+section("matching: humanize_cause (camelCase identifiers vs. already-human text)")
+
+check(
+    "the real reported bug: XLSX placeholder no longer shows as a mangled run-together word",
+    matching.humanize_cause("advanceNoticeFullClosure") == "Advance notice full closure",
+)
+check(
+    "National Highways DATEX causeType values split correctly",
+    matching.humanize_cause("roadMaintenance") == "Road maintenance"
+    and matching.humanize_cause("constructionWork") == "Construction work"
+    and matching.humanize_cause("roadOrCarriagewayOrLaneManagement")
+    == "Road or carriageway or lane management",
+)
+check(
+    "Traffic Scotland's already-human Works text is left completely untouched, casing and all",
+    matching.humanize_cause("Barrier Repair, Filter Drain, Inspections, Sign Installation/Repairs")
+    == "Barrier Repair, Filter Drain, Inspections, Sign Installation/Repairs",
+)
+check("empty input -> empty output", matching.humanize_cause("") == "")
+
 section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
 
 gretna_style = {
@@ -166,6 +186,15 @@ check("road_name extracted", flat[0]["road_name"] == "M6")
 check("direction extracted", flat[0]["direction"] == "southBound")
 check("lanes extracted", flat[0]["lanes_restricted"] == 1 and flat[0]["lanes_operational"] == 2)
 check("record_id from idG", flat[0]["record_id"] == "test-001")
+
+section("national_highways: looks_unplanned (cause_type incident-keyword heuristic)")
+
+check("known planned-maintenance causes are NOT flagged", not nh.looks_unplanned("roadMaintenance")
+      and not nh.looks_unplanned("constructionWork"))
+check("incident-flavoured causes ARE flagged",
+      nh.looks_unplanned("vehicleAccident") and nh.looks_unplanned("generalObstruction")
+      and nh.looks_unplanned("abnormalTraffic"))
+check("empty cause_type not flagged", not nh.looks_unplanned(""))
 
 section("national_highways: find_next_page_url")
 
