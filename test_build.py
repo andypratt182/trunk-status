@@ -448,6 +448,91 @@ check("diversion text stays intact", "Leave the motorway at J22" in entries[0]["
 check("Traffic Management paren spacing fixed", entries[0]["lane_info"] == "Road Closure (immediate)")
 
 
+section("traffic_scotland: isolate_road_segment (cross-road junction contamination guard)")
+
+_m74_aliases = scot.ROAD_ALIASES["M74"]
+
+check(
+    "real rogue example: M8's 'Jct 22' stripped out, M74's own 'Jct 3a' kept",
+    scot.isolate_road_segment(
+        "M8 (Sec C/Way Jct 22) to M74 SB (Sec C/Way Jct 3a), Eastbound", _m74_aliases
+    ) == "M74 SB (Sec C/Way Jct 3a), Eastbound",
+)
+check(
+    "single-road text is left completely unchanged",
+    scot.isolate_road_segment("M74 J8 - J9 SB - Lane Closures", _m74_aliases)
+    == "M74 J8 - J9 SB - Lane Closures",
+)
+check(
+    "legitimate cross-road entry with M74's OWN real junctions still isolates correctly",
+    scot.isolate_road_segment("M8 (Some Slip) to M74 (Jct 15 to Jct 16), Southbound", _m74_aliases)
+    == "M74 (Jct 15 to Jct 16), Southbound",
+)
+check(
+    "target road absent from text -> unchanged (safe fallback, nothing to isolate)",
+    scot.isolate_road_segment("M8 (Jct 10) to A80 (Jct 5), Northbound", _m74_aliases)
+    == "M8 (Jct 10) to A80 (Jct 5), Northbound",
+)
+
+section("traffic_scotland: fetch_from_traffic_scotland excludes an M8/M74 entry whose only "
+        "in-range 'junction' actually belongs to the M8, not M74 (real reported case)")
+
+rogue_listing_html = """
+<html><body><div class="views-row">
+<h2>M8 EB Sec c/way Jct 22 to M74 SB Jct 3a - Mobile Lane Closures</h2>
+<p>Location:M8 (Sec C/Way Jct 22) to M74 (Sec C/Way Jct 3a), Eastbound</p>
+<p>Start time:11th of May 2026, 8:00pm</p>
+<p>Description:Works:<br>Cyclic Maintenance, Pothole Repairs</p>
+<a href="https://www.traffic.gov.scot/more-details?sid=cSWROGUE2&type=roadworks">More details</a>
+</div></body></html>
+"""
+rogue_detail_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M8 (Sec C/Way Jct 22) to M74 SB (Sec C/Way Jct 3a)
+Direction
+Eastbound
+Starting
+11th of May 2026, 8:00pm
+Ending
+12th of May 2026, 6:00am
+Roadwork description
+Works:
+Cyclic Maintenance, Pothole Repairs
+Traffic Management:
+Mobile Lane Closures.
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+
+
+def fake_fetch_text_rogue2(url, headers=None):
+    if "planned-roadworks" in url:
+        return "<html><body>none</body></html>"
+    if "more-details" in url:
+        return rogue_detail_html
+    return rogue_listing_html
+
+
+_original_fetch_text2 = scot.fetch_text
+scot.fetch_text = fake_fetch_text_rogue2
+try:
+    rogue2_results = scot.fetch_from_traffic_scotland("M74")
+finally:
+    scot.fetch_text = _original_fetch_text2
+
+check("entry passes through with location isolated to M74's own segment",
+      len(rogue2_results) == 1 and "M8" not in rogue2_results[0]["location_description"])
+rogue2_rows = matching.rows_for_leg(rogue2_results, "M74", "Eastbound", 8, 22)
+check(
+    "correctly EXCLUDED from the M74 J8-22 leg -- M8's Jct 22 no longer "
+    "masquerades as an in-range M74 junction; the real M74 junction (3A) is out of range",
+    len(rogue2_rows) == 0,
+)
+
+
 section("traffic_scotland: compute_validity_status (real-time active/planned)")
 
 from datetime import datetime as _dt

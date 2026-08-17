@@ -234,16 +234,20 @@ route legs just use `road_name: "M74"` regardless of which name a given
 closure was published under.
 
 **Known limitations**:
-- **Cross-road closures need their own explicit junction number.** Some
-  closures span two different roads (e.g. an M8/M74 interchange). If such
-  a closure has no M74-specific junction number stated directly in its
-  location text, it's excluded entirely rather than risk borrowing a
-  junction number from the diversion text that might actually belong to
-  the *other* road (a real case: an M8/M74 closure whose diversion
-  mentioned M8's own junctions 21 and 23, which would otherwise have been
-  wrongly treated as M74 junctions since they happened to fall inside the
-  M74 J8–22 range). The build log reports how many entries were skipped
-  this way.
+- **Cross-road closures only use the target road's own segment.** Some
+  closures span two different roads (e.g. an M8/M74 interchange). When
+  that happens, `isolate_road_segment()` splits the text at each road
+  mention and keeps only the portion describing the target road, so a
+  coincidental junction number belonging to the *other* road can't be
+  mistaken for one of ours purely because both numbers appear together
+  in one combined string — this was a real bug, not just a hypothetical
+  one: an M8/M74 entry whose location read "M8 (...Jct 22) to M74 SB
+  (...Jct 3a)" was incorrectly matching the M74 J8–22 leg on the M8's own
+  "Jct 22", even though the closure was actually describing M74's own
+  out-of-range Junction 3A. If, after isolating the target road's own
+  segment, there's still no junction number to go on at all, the entry is
+  excluded rather than guessed at — the build log reports how many
+  entries were skipped this way.
 - **No timezone given on the site** — start/end times are stored as
   naive local (UK) time, not authoritative to the minute across a DST
   boundary.
