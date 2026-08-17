@@ -239,6 +239,15 @@ check("one call used closureType=planned, the other closureType=unplanned",
       and any("closureType=unplanned" in u for u in _nh_test_calls))
 check("results from both calls are merged, including the incident record",
       len(nh_closures) == 3 and any(c["cause_type"] == "vehicleAccident" for c in nh_closures))
+check(
+    "each closure is reliably tagged with which closureType query returned it -- "
+    "the signal actually worth trusting, since a real unplanned closure turned "
+    "out to have a generic cause_type ('roadOrCarriagewayOrLaneManagement') that "
+    "no keyword guess would have flagged",
+    all(c["closure_category"] in ("planned", "unplanned") for c in nh_closures)
+    and sum(1 for c in nh_closures if c["closure_category"] == "planned") == 2
+    and sum(1 for c in nh_closures if c["closure_category"] == "unplanned") == 1,
+)
 
 _nh_test_calls.clear()
 nh.fetch_json = _fake_nh_fetch_json
@@ -252,16 +261,9 @@ finally:
 check("closure_type explicitly set to 'planned' -> only 1 call made (unchanged behavior)",
       len(_nh_test_calls) == 1 and "closureType=planned" in _nh_test_calls[0])
 check("only the planned records are returned", len(nh_closures_explicit) == 2)
+check("those records are also correctly tagged closure_category='planned'",
+      all(c["closure_category"] == "planned" for c in nh_closures_explicit))
 
-
-section("national_highways: looks_unplanned (cause_type incident-keyword heuristic)")
-
-check("known planned-maintenance causes are NOT flagged", not nh.looks_unplanned("roadMaintenance")
-      and not nh.looks_unplanned("constructionWork"))
-check("incident-flavoured causes ARE flagged",
-      nh.looks_unplanned("vehicleAccident") and nh.looks_unplanned("generalObstruction")
-      and nh.looks_unplanned("abnormalTraffic"))
-check("empty cause_type not flagged", not nh.looks_unplanned(""))
 
 section("national_highways: find_next_page_url")
 

@@ -114,25 +114,35 @@ Notes on this data source:
   but that assumption was never verified against a live response -- and
   turned out to be wrong. A real run with `closure_type: null` returned
   only `roadMaintenance`/`constructionWork`/`authorityOperation` causes
-  across 3,201 records, with zero incident-flavoured ones, which is
-  extremely unlikely if "both" were genuinely being returned across a
-  live network that size over a 29-day window. `closure_type: null` now
-  makes two separate requests (`closureType=planned` and
-  `closureType=unplanned`) and merges the results, rather than trusting
-  an unverified default. Setting `closure_type` to an explicit single
-  value still makes just one request, unchanged.
+  across 3,201 records, with zero unplanned ones (confirmed separately,
+  since an *earlier* real run — closer in time — did return 4 genuinely
+  unplanned records once the fix below was in place; the network simply
+  had 0 active unplanned closures at that first snapshot, which is a
+  normal, non-alarming result). `closure_type: null` now makes two
+  separate requests (`closureType=planned` and `closureType=unplanned`)
+  and merges the results, rather than trusting an unverified default.
+  Setting `closure_type` to an explicit single value still makes just one
+  request, unchanged.
+- **Each closure is tagged `closure_category: "planned"` or `"unplanned"`
+  based on which query actually returned it — not guessed from `cause_type`
+  text.** An early version tried to spot incidents by keyword-matching
+  `cause_type` (looking for words like "accident" or "collision"), but a
+  real unplanned closure turned out to have the generic, bureaucratic-sounding
+  `cause_type` of `"roadOrCarriagewayOrLaneManagement"` — indistinguishable
+  by text from ordinary planned maintenance. The `closureType` the API was
+  actually asked for is the one reliable signal for "was this unplanned",
+  so that's what gets carried through now.
 - Rate limit: 10 calls/minute per key. This build makes 1 or 2 calls per
   run depending on `closure_type` (2 when left as `null`/"both"), so this
   is not a concern even at a frequent rebuild schedule.
 - Known data limitation (per National Highways' own docs): closures are
   only reported where physical signs/signals (VSS) are actively set on
   the network, so some real-world closures may not appear.
-- `sources/national_highways.py`'s `UNPLANNED_CAUSE_KEYWORDS`/`looks_unplanned()`
-  print a `cause_type` breakdown to the build log every run, flagging
-  anything that looks incident-like by keyword. This is a best-effort
-  guess pending real confirmation of the actual `cause_type` values used
-  for unplanned closures -- useful for deciding whether it's worth adding
-  a visual "Incident" distinction on the site once real values are seen.
+- The build log prints a `cause_type` breakdown **per closureType category**
+  every run (`cause_type breakdown for closureType=unplanned (N records): ...`),
+  so it's easy to see at a glance what's actually coming through and
+  decide whether it's worth adding a visual "Incident"/"Unplanned"
+  distinction on the site.
 
 ## Data source: flat JSON mirror (alternative, no API key)
 
