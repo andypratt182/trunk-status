@@ -130,22 +130,18 @@ Rows from this source appear in the site's **Source** column as "Advance
 notice (full closure)" so they're clearly distinguishable from live API
 rows.
 
-**This is unverified against a real download** — I wrote the column-matching
-flexibly (by keyword, not exact position) and with verbose logging rather
-than against a confirmed schema, since I couldn't fetch the actual binary
-file to inspect it directly. On your first live build, check the Actions
-log for lines like:
+Real column headers, confirmed against a live download: `Road number`,
+`Direction`, `Location`, `Scheduled start time`, `Scheduled end time`,
+`Closure details, including diversions` — matched flexibly by keyword,
+not exact position, in `XLSX_HEADER_SYNONYMS`.
 
-```
-sheet 'Friday 14 August' headers: ('Road', 'Direction', 'Location', ...)
-sheet 'Friday 14 August': parsed 12 closure rows
-```
-
-If a sheet instead logs `no recognizable 'road' column`, or the parsed row
-count is unexpectedly 0, share that log output and the column-matching in
-`build.py` (`XLSX_HEADER_SYNONYMS`) can be corrected to match the real
-headers. A failure in this source never breaks the rest of the build — it's
-wrapped to fail gracefully and just log a warning if something's wrong.
+Only the first `MAX_COLUMNS_TO_READ` (20) columns are read per sheet, even
+though a sheet can *report* far more than that — some sheets have cell
+formatting applied out to hundreds of otherwise-empty columns (seen on a
+live "Tuesday" sheet), and `openpyxl` reports a sheet's "used" range out
+to wherever formatting was ever applied, not just where real data is.
+Reading all of that for every row is real overhead with no data in it, so
+this is capped with generous headroom beyond the 6 known real columns.
 
 To turn this off, delete the `additional_sources:` block from `routes.yaml`.
 
@@ -174,13 +170,33 @@ pages instead, in two stages:
 
 Rows show as "Traffic Scotland (scraped)" in the Source column.
 
+**Status is computed from real time, not the listing page.** Traffic
+Scotland's own current/planned split is just which listing page an entry
+appeared on, which can be stale between rebuilds. `compute_validity_status()`
+instead checks whether "now" (UK local time) actually falls within the
+entry's own start/end window: **active** only while that's true, **planned**
+otherwise — falling back to the listing-page label only if either
+datetime is missing or unparseable.
+
+**Column layout.** Works (cause) shows in the table's own Cause column.
+Traffic Management goes in the **Lanes** column (e.g. "Lane Closure
+(40mph)", "Road Closure.") — it's not lane-count data the way National
+Highways' numeric fields are, but Lanes was otherwise always empty for
+this source, and Traffic Management is the closest equivalent info.
+Some long-running entries publish Traffic Management as a per-date list
+(one entry for every day across the whole closure, e.g. "15/10/2024 -
+Portable Traffic Lights (TTLS), 16/10/2024 - ..."); `extract_tm_for_date()`
+picks out just the entry matching each row's own date and drops the date
+prefix, rather than showing that whole list. Diversion info, which has
+nowhere else to go, is the only thing left in the location subtext.
+
 **Activity Periods — expanded into individual rows, not one misleading
 block.** Some closures also publish a "Days & times affected" section
 giving the *exact* overnight windows they're actually active (e.g. "Thu
 20th Aug - 22:00 to 23:59"), while their overall Starting/Ending dates
 can span many weeks — the road usually isn't closed continuously for
 that whole span, only on specific nights within it. When present,
-`scotland_parse_detail_page()` returns **one row per actual closure
+`parse_detail_page()` returns **one row per actual closure
 window** instead of a single row spanning the misleading overall range.
 Periods either side of midnight (e.g. "22:00 to 23:59" then "00:00 to
 06:00" the next day) are merged into one continuous window, since

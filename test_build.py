@@ -191,6 +191,38 @@ check("finds header on row 2 (index 1), not row 1", header_idx == 1)
 check("maps 'Road Number' -> road_name", "road_name" in col_map)
 check("maps 'Scheduled Start Time' -> start_datetime", "start_datetime" in col_map)
 
+section("xlsx_advance_notice: MAX_COLUMNS_TO_READ caps how many columns are actually read")
+
+check(
+    "cap is generous enough to cover all 6 known real columns",
+    xlsx.MAX_COLUMNS_TO_READ >= 6,
+)
+
+section("xlsx_advance_notice: trim_trailing_empty (real Tuesday-sheet-style padding)")
+
+padded_row = (
+    "Road number", "Direction", "Location", "Scheduled\nstart time",
+    "Scheduled\nend time", "Closure details, including diversions"
+) + (None,) * 300
+trimmed = xlsx.trim_trailing_empty(padded_row)
+check("hundreds of trailing Nones removed (logging cleanup only)", len(trimmed) == 6)
+check(
+    "real headers preserved exactly",
+    trimmed == ("Road number", "Direction", "Location", "Scheduled\nstart time",
+                "Scheduled\nend time", "Closure details, including diversions"),
+)
+check(
+    "a None in the MIDDLE of a row is preserved, not stripped",
+    xlsx.trim_trailing_empty(("Road", None, "Location")) == ("Road", None, "Location"),
+)
+check(
+    "header detection still works correctly against heavily-padded rows (fix is logging-only)",
+    xlsx.find_header_row([
+        ("title row",) + (None,) * 5,
+        ("Road Number", "Direction", "Location", "Start", "End", "Comment") + (None,) * 300,
+    ])[0] == 1,
+)
+
 section("xlsx_advance_notice: unrecognized schema -> graceful no-match")
 
 header_idx, col_map = xlsx.find_header_row([("Foo", "Bar", "Baz")] * 8)
@@ -413,6 +445,89 @@ check("share-widget boilerplate NOT in comment",
       "Share" not in entries[0]["comment"] and "Copy link" not in entries[0]["comment"])
 check("diversion text stays intact", "Leave the motorway at J22" in entries[0]["comment"])
 check("Traffic Management paren spacing fixed", entries[0]["lane_info"] == "Road Closure (immediate)")
+
+
+section("traffic_scotland: compute_validity_status (real-time active/planned)")
+
+from datetime import datetime as _dt
+_now = _dt(2026, 8, 20, 12, 0, 0)
+
+check(
+    "now within [start, end] -> active",
+    scot.compute_validity_status("2026-08-20T08:00:00", "2026-08-20T18:00:00", _now, fallback="planned") == "active",
+)
+check(
+    "now before the window -> planned",
+    scot.compute_validity_status("2026-08-25T08:00:00", "2026-08-25T18:00:00", _now, fallback="active") == "planned",
+)
+check(
+    "now after the window -> planned (per spec: active only during, planned if outwith)",
+    scot.compute_validity_status("2026-08-10T08:00:00", "2026-08-10T18:00:00", _now, fallback="active") == "planned",
+)
+check(
+    "boundaries are inclusive (exactly at start/end still counts as active)",
+    scot.compute_validity_status("2026-08-20T12:00:00", "2026-08-20T18:00:00", _now, fallback="planned") == "active"
+    and scot.compute_validity_status("2026-08-20T08:00:00", "2026-08-20T12:00:00", _now, fallback="planned") == "active",
+)
+check(
+    "missing or unparseable dates fall back to the listing-page status rather than guessing",
+    scot.compute_validity_status("2026-08-20T08:00:00", "", _now, fallback="active") == "active"
+    and scot.compute_validity_status("not-a-date", "2026-08-20T18:00:00", _now, fallback="planned") == "planned",
+)
+
+section("traffic_scotland: fetch_from_traffic_scotland overrides a stale listing-page label with real status")
+
+live_listing_html = """
+<html><body><div class="views-row">
+<h2>M74 J8 - J9 SB - Currently Happening</h2>
+<p>Location:M74 (J8 Off Slip to J9 On Slip), Southbound</p>
+<p>Start time:20th of July 2026, 8:00pm</p>
+<p>Description:Works:<br>Barrier Repair</p>
+<a href="https://www.traffic.gov.scot/more-details?sid=cSWLIVE&type=roadworks">More details</a>
+</div></body></html>
+"""
+live_detail_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M74 J8 - J9 SB - Currently Happening
+Direction
+Southbound
+Starting
+1st of January 2020, 12:00am
+Ending
+1st of January 2099, 12:00am
+Roadwork description
+Works:
+Barrier Repair
+Traffic Management:
+Lane Closure (40mph)
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+
+
+def fake_fetch_text_live(url, headers=None):
+    if "planned-roadworks" in url:
+        return live_listing_html  # deliberately found on the "planned" page
+    if "more-details" in url:
+        return live_detail_html
+    return "<html><body>none</body></html>"
+
+
+_original_fetch_text = scot.fetch_text
+scot.fetch_text = fake_fetch_text_live
+try:
+    live_results = scot.fetch_from_traffic_scotland("M74")
+finally:
+    scot.fetch_text = _original_fetch_text
+
+check("entry found", len(live_results) == 1)
+check(
+    "status is 'active' based on the real time window, not the stale 'planned' page it came from",
+    live_results[0]["validity_status"] == "active",
+)
 
 
 section("matching: lane_info flows through rows_for_leg into the rendered row")
