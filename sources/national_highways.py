@@ -20,26 +20,6 @@ from matching import format_dt
 
 NATIONAL_HIGHWAYS_DEFAULT_BASE_URL = "https://api.data.nationalhighways.co.uk"
 
-# Cause-type keywords that typically indicate an UNPLANNED/incident-driven
-# closure in DATEX II vocabulary, as opposed to planned maintenance or
-# construction work. This is a best-effort heuristic for the diagnostic
-# log below, not a confirmed classification -- the exact cause_type
-# values National Highways actually uses for unplanned closures haven't
-# been verified against a live response (no API key was available while
-# writing this). The point of this diagnostic is specifically to surface
-# the real values on a live run so this list (and any follow-up, like a
-# visual "Incident" badge) can be built against real data instead of a
-# guess.
-UNPLANNED_CAUSE_KEYWORDS = (
-    "accident", "collision", "incident", "obstruction", "breakdown",
-    "vehicleFire", "spillage", "debris", "abnormalTraffic",
-)
-
-
-def looks_unplanned(cause_type: str) -> bool:
-    lowered = cause_type.lower()
-    return any(keyword.lower() in lowered for keyword in UNPLANNED_CAUSE_KEYWORDS)
-
 
 def fetch_json(url: str, headers: dict | None = None) -> tuple[dict, dict]:
     """Returns (payload, response_headers) so callers can inspect pagination
@@ -242,6 +222,14 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
         else:
             print(f"  closureType={closure_type}: {len(type_closures)} closure-location "
                   f"records (single page -- no pagination link found)")
+
+        # Tag each closure with which query actually returned it. This is
+        # the reliable signal for "was this unplanned" -- cause_type text
+        # turned out NOT to be: real unplanned closures have shown up
+        # with a generic cause_type like "roadOrCarriagewayOrLaneManagement",
+        # not anything that a keyword guess would flag as incident-like.
+        for c in type_closures:
+            c["closure_category"] = closure_type
         closures.extend(type_closures)
 
     print(f"Loaded {len(closures)} closure-location records from the live API "
@@ -249,29 +237,22 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
           f"({', '.join(closure_types_to_fetch)})")
 
     if closures:
-        # Diagnostic: real cause_type distribution, so we can see exactly
-        # what's already coming through (planned maintenance vs.
-        # unplanned/incident-driven) before deciding whether it's worth
-        # visually distinguishing incidents on the site. Counts are per
-        # location-segment, not per unique closure, since one closure can
-        # have multiple location segments -- fine for a rough breakdown,
-        # not meant to be an exact incident count.
-        cause_counts = Counter(c.get("cause_type") or "(none)" for c in closures)
-        print("  cause_type breakdown across all fetched closures:")
-        for cause_type, count in cause_counts.most_common():
-            flag = "  <- looks unplanned/incident-like (keyword guess)" if looks_unplanned(cause_type) else ""
-            print(f"    {count:5d}x  {cause_type!r}{flag}")
-
-        unplanned_estimate = sum(n for ct, n in cause_counts.items() if looks_unplanned(ct))
-        if unplanned_estimate:
-            pct = unplanned_estimate / len(closures) * 100
-            print(f"  ~{unplanned_estimate} of {len(closures)} ({pct:.1f}%) have an "
-                  f"unplanned/incident-flavoured cause_type by keyword guess -- see the "
-                  f"real breakdown above before trusting this number.")
-        else:
-            print("  none of the cause_type values matched the unplanned/incident keyword "
-                  "guess -- check the breakdown above for the real values in use; the "
-                  "keyword list in UNPLANNED_CAUSE_KEYWORDS may just need updating to match.")
+        # Diagnostic: real cause_type distribution, broken down by which
+        # closureType query actually returned each record -- this is the
+        # reliable signal for "is this unplanned", not cause_type text
+        # (see the tagging comment above). Counts are per location-segment,
+        # not per unique closure, since one closure can have multiple
+        # location segments -- fine for a rough breakdown, not meant to be
+        # an exact incident count.
+        for category in closure_types_to_fetch:
+            category_closures = [c for c in closures if c.get("closure_category") == category]
+            if not category_closures:
+                continue
+            cause_counts = Counter(c.get("cause_type") or "(none)" for c in category_closures)
+            print(f"  cause_type breakdown for closureType={category} "
+                  f"({len(category_closures)} records):")
+            for cause_type, count in cause_counts.most_common():
+                print(f"    {count:5d}x  {cause_type!r}")
 
     if not closures:
         print("Warning: 0 records parsed. If this is unexpected, the API's "
