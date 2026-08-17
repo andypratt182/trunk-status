@@ -26,7 +26,7 @@
 # ---------------------------------------------------------------------------
 
 site:
-  title: "Route Closures"
+  title: "Route Disruptions"
 
   # --- Live National Highways API (default) ---
   # Requires a free API key from https://developer.data.nationalhighways.co.uk

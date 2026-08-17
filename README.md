@@ -1,4 +1,4 @@
-# Route Closures
+# Route Disruptions
 
 A small static site that shows current/upcoming roadworks for a handful of
 hand-picked road sections ("routes"), each split into northbound and
@@ -52,6 +52,18 @@ returns closures in one common flat shape (`road_name`, `direction`,
 works identically regardless of which source a closure came from. Adding
 a new source later means adding a new module here, not editing the
 others.
+
+`cause_type` in particular comes in two shapes depending on the source:
+camelCase machine identifiers (National Highways' DATEX `causeType`,
+e.g. `"roadMaintenance"`; this project's own XLSX-source placeholder,
+`"advanceNoticeFullClosure"`) and already-human text (Traffic Scotland's
+"Works:" field, e.g. `"Barrier Repair, Filter Drain"`). `matching.humanize_cause()`
+splits the first kind into words (`"roadMaintenance"` -> `"Road maintenance"`)
+and leaves the second kind's casing alone -- a bare `capitalize()` filter
+would otherwise turn a camelCase identifier into one long run-together
+word (`"advanceNoticeFullClosure"` -> `"Advancenoticefullclosure"`, a
+real bug this project had) *and* forcibly lowercase already-well-cased
+human text.
 
 ### Running the tests
 
@@ -110,6 +122,21 @@ the same field names build.py expects (`road_name`, `direction`,
 `location_description`, etc.). Swap the `site:` block in `routes.yaml` to
 use this instead -- see the comments in that file.
 
+## Mobile closures view
+
+On narrow screens (≤640px), the closures table restyles into one bordered
+card per closure instead of a horizontally-scrolling table. This is
+pure CSS on the *same* `<tr>`/`<td>` markup as the desktop table (each
+`<td>` has a `data-label` attribute, shown via a CSS `::before` at that
+width) — nothing in the DOM changes, so the day-filter and live-status
+JS keep working completely unchanged; they operate on the same elements
+either way. One thing this requires: `table.closures tr[hidden] { display:
+none; }` explicitly overrides the responsive `display: block` rule for
+hidden rows, since a plain attribute selector like `[hidden]` alone has
+lower CSS specificity than a compound one like `table.closures tr` and
+would otherwise lose that fight, leaving day-filtered-out rows visibly
+showing as cards.
+
 ## Day filter
 
 The all-routes page (`index.html`) has a row of filter buttons — **Today**,
@@ -121,12 +148,22 @@ under "All"), and **All** last. Selecting a day there:
   itself (from embedded per-closure date data, no rebuild needed), and
 - carries through to whichever route page you click into next, via
   `localStorage` — that page's table is pre-filtered to the same day on
-  load, with a small hint ("Showing closures for Tomorrow — change this on
+  load, with a small hint ("Showing disruptions for Tomorrow — change this on
   the all routes page") linking back to the index page to change it. There
   are no buttons on the route pages themselves.
 
 Defaults to **Today** on a first-ever visit (no stored preference yet).
 This all runs client-side — the JS lives in `static/day-filter.js`.
+
+**Already-ended closures are hidden under any specific-day filter.**
+"Today" (and every other day option) is calendar-day overlap plus a check
+that the closure hasn't already fully finished — a closure running 22:00
+yesterday to 06:00 today technically overlaps today's calendar date, but
+by mid-morning it's simply over and showing it under "what's happening
+today" is misleading. This only ever affects "Today" in practice, since
+every other day option is entirely in the future by construction and
+can't already have ended. **All** is unaffected — it's the explicit
+"show me everything" view, past included, and never applies this check.
 
 ## Additional source: advance-notice full closures (XLSX)
 
