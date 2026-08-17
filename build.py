@@ -143,7 +143,8 @@ def main() -> None:
                 "count": built["total"],
                 "active_count": built["active_total"],
                 "date_summary": [
-                    {"start": r["start_iso"], "end": r["end_iso"], "status": r["status"]}
+                    {"start": r["start_iso"], "end": r["end_iso"], "status": r["status"],
+                     "source": r["source_label"]}
                     for lg in built["leg_groups"] for r in lg["rows"]
                 ],
                 "leg_summary": [
