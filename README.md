@@ -170,13 +170,24 @@ pages instead, in two stages:
 
 Rows show as "Traffic Scotland (scraped)" in the Source column.
 
-**Status is computed from real time, not the listing page.** Traffic
-Scotland's own current/planned split is just which listing page an entry
-appeared on, which can be stale between rebuilds. `compute_validity_status()`
-instead checks whether "now" (UK local time) actually falls within the
-entry's own start/end window: **active** only while that's true, **planned**
-otherwise — falling back to the listing-page label only if either
-datetime is missing or unparseable.
+**Status is computed from real time, not the listing page — both at build
+time and live in the browser.** Traffic Scotland's own current/planned
+split is just which listing page an entry appeared on. `compute_validity_status()`
+in `sources/traffic_scotland.py` checks whether "now" (UK local time)
+actually falls within the entry's own start/end window at build time:
+**active** only while that's true, **planned** otherwise (comparing
+against `start` alone if `end` is missing, and only falling back to the
+listing-page label if even `start` is unusable).
+
+That alone isn't enough, though — a closure's real window is often just a
+few hours (an overnight closure), so a status baked in at build time can
+go stale well before the next scheduled rebuild. `static/day-filter.js`
+also recomputes status **live in the browser** on page load, for Traffic
+Scotland rows only (`data-source="Traffic Scotland (scraped)"`) — other
+sources are left as server-rendered, since they can have a status (e.g.
+"suspended") that isn't derivable from dates alone. This also feeds into
+the index page's live active-count recompute (see the day filter section
+below), so the two stay consistent with each other.
 
 **Column layout.** Works (cause) shows in the table's own Cause column.
 Traffic Management goes in the **Lanes** column (e.g. "Lane Closure
