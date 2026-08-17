@@ -209,7 +209,7 @@
       if (wrap) wrap.hidden = visibleCount === 0 && dayStart !== null;
     });
 
-    // "Showing closures for <day> -- change this on the all routes page" hint
+    // "Showing disruptions for <day> -- change this on the all routes page" hint
     const hint = document.querySelector("[data-day-filter-hint]");
     if (hint) {
       if (dayStart === null) {
@@ -254,7 +254,7 @@
         }
       });
 
-      countEl.innerHTML = `${total} closure${total !== 1 ? "s" : ""}` +
+      countEl.innerHTML = `${total} disruption${total !== 1 ? "s" : ""}` +
         (active > 0 ? `<span class="active-flag"> \u00b7 ${active} active</span>` : "");
     });
   }
