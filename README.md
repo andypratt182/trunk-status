@@ -39,6 +39,7 @@ sources/
   national_highways.py          live API + flat JSON mirror
   xlsx_advance_notice.py        National Highways advance-notice spreadsheet
   traffic_scotland.py           Traffic Scotland scraper (M74)
+  travel_alerts.py               National Highways Travel Alerts scraper (major incidents)
 test_build.py                   test suite for matching.py + all three sources
 routes.yaml                     route/leg definitions + data source config
 templates/, static/             Jinja templates and the day-filter JS/CSS
@@ -194,6 +195,59 @@ today" is misleading. This only ever affects "Today" in practice, since
 every other day option is entirely in the future by construction and
 can't already have ended. **All** is unaffected — it's the explicit
 "show me everything" view, past included, and never applies this check.
+
+## Additional source: Travel Alerts (major incidents)
+
+National Highways' public "Travel Alerts" page lists the highest-priority
+current incidents (major collisions, fires, serious closures) across the
+*entire* English strategic network — typically only 2-3 entries at any
+given moment. **Not auto-enabled** — add a
+`type: "travel_alerts_scraper"` entry per road you want covered under
+`additional_sources` in `routes.yaml` (commented-out example already
+there).
+
+**This is a genuinely separate data source from the API's own
+"unplanned" `closureType`**, confirmed directly: on the same day, the
+same build, the API's unplanned closures were 4 generic
+`roadOrCarriagewayOrLaneManagement`-tagged records, while Travel Alerts
+showed 3 completely different, specific, named incidents (an M6
+collision, an A31 fire closure, an A303 vehicle fire) that never
+appeared via the API at all. They're two separate systems at National
+Highways, not two views onto the same data.
+
+**No start/end time, deliberately.** Unlike every other source in this
+project, Travel Alerts has no structured schedule anywhere — not even on
+the individual incident pages, which bury timing in narrative prose
+("occurred at approximately 04:10 on the morning of..."). Rather than
+attempt fragile natural-language date parsing, this source doesn't try:
+an alert is `validity_status: "active"` for as long as it appears on the
+listing page (National Highways removes it once resolved), with blank
+Start/End columns — an honest representation of what the data actually
+is, not a gap to paper over.
+
+**Cross-road junction contamination guard, same lesson as Traffic
+Scotland.** Titles like "A31 - Between M27 J2 and A338" reference a
+*different* road's junction (M27's) as a location marker for where the
+A31 closure is — `strip_other_road_junctions()` removes any `<ROAD> J<N>`
+mention belonging to a road other than the target before junction
+matching runs, so a coincidental in-range junction number on the
+*wrong* road can't be mistaken for one on the target road. Bare
+junctions with no road name attached (e.g. "Between J15 and J16") are
+always trusted.
+
+**"Both directions" is treated as a wildcard**, matching either
+direction's leg — real Travel Alerts frequently report this (2 of the
+3 checked while building this feature did), and without this,
+`closure_matches_leg()`'s exact-direction comparison would have matched
+neither a route's northbound nor southbound leg, silently dropping the
+alert from both. See `matching.BOTH_DIRECTIONS_VALUES`.
+
+**Unverified against live markup** (same caveat as Traffic Scotland's
+listing page, for the same reason — this project's fetch tooling
+converts pages to text, never exposing raw HTML). If a live run logs
+`found 0 total alert(s)`, check `parse_alert_cards()` in
+`sources/travel_alerts.py` against the page's real structure. A parsing
+failure here is a warning, not a build-breaking error.
 
 ## Additional source: advance-notice full closures (XLSX)
 

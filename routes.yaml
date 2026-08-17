@@ -71,6 +71,22 @@ site:
     - type: "traffic_scotland_scraper"
       road_name: "M74"
 
+    # National Highways "Travel Alerts": major incidents (crashes, fires,
+    # serious collisions), scraped from the public alerts page. NOT
+    # auto-enabled by default -- add one entry per road you want covered,
+    # e.g.:
+    #   - type: "travel_alerts_scraper"
+    #     road_name: "M6"
+    # This is a genuinely different, non-overlapping data source from the
+    # API's own "unplanned" closureType (confirmed by comparing real
+    # output from both on the same day) -- see build.py's comments and
+    # sources/travel_alerts.py's module docstring for why. Typically has
+    # only 2-3 entries covering the WHOLE English network at any moment,
+    # so 0 matches for your specific road on any given build is normal,
+    # not a sign something's broken. Has no start/end time (see
+    # sources/travel_alerts.py) -- deliberately, since the source data
+    # itself has none.
+
 routes:
   - id: axis
     name: "Axis"

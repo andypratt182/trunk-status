@@ -21,6 +21,7 @@ import matching
 import build
 from sources import national_highways as nh
 from sources import traffic_scotland as scot
+from sources import travel_alerts as ta
 from sources import xlsx_advance_notice as xlsx
 
 FAILURES = 0
@@ -813,6 +814,142 @@ tmp_path.write_bytes(b"body { color: blue; }")
 hash2 = build.content_hash(tmp_path)
 check("hash changes when file content changes (forces a fresh fetch)", hash1 != hash2)
 tmp_path.unlink()
+
+
+# =======================================================================
+# sources/travel_alerts.py
+# =======================================================================
+
+section("travel_alerts: strip_other_road_junctions (real screenshot titles)")
+
+check(
+    "M27's junction is stripped from an A31 title (belongs to a different road)",
+    "J2" not in ta.strip_other_road_junctions(
+        "A31 - Between M27 J2 and A338 - Road Closure", "A31"
+    ),
+)
+check(
+    "bare junctions with no road prefix are left completely unchanged",
+    ta.strip_other_road_junctions("M6 - Between J15 and J16 - Carriageway Closure", "M6")
+    == "M6 - Between J15 and J16 - Carriageway Closure",
+)
+check(
+    "cleaned A31 text has no extractable junction number (correctly excluded from range matching)",
+    matching._junctions_in_text(
+        ta.strip_other_road_junctions("A31 - Between M27 J2 and A338 - Road Closure", "A31")
+    ) == [],
+)
+check(
+    "cleaned M6 text correctly yields junctions 15 and 16",
+    matching._junctions_in_text(
+        ta.strip_other_road_junctions("M6 - Between J15 and J16 - Carriageway Closure", "M6")
+    ) == [15, 16],
+)
+
+section("travel_alerts: parse_alert_cards + fetch_from_travel_alerts (real screenshot content)")
+
+_ta_listing_html = """
+<html><body>
+<div class="alert-card">
+  <h2>A31 - Between M27 J2 and A338 - Road Closure</h2>
+  <p>Hampshire - Off strategic network incident - Expect Delays - Both directions</p>
+  <a href="/roads-and-travel/live-travel-updates/travel-alerts/a31-hampshire-both-directions-fire-road-closed-between-m27-j2-and-a338/">More details</a>
+</div>
+<div class="alert-card">
+  <h2>M6 - Between J15 and J16 - Carriageway Closure</h2>
+  <p>Staffordshire - Road traffic collision - Expect Delays - Northbound</p>
+  <a href="/roads-and-travel/live-travel-updates/travel-alerts/m6-staffordshire-northbound-road-traffic-collision-carriageway-closed-j15-j16/">More details</a>
+</div>
+<div class="alert-card">
+  <h2>A303 - Between A358 and A30 - Road Closure</h2>
+  <p>Somerset - Vehicle fire - Expect Delays - Both directions</p>
+  <a href="/roads-and-travel/live-travel-updates/travel-alerts/a303-somerset-both-directions-vehicle-fire-road-closed/">More details</a>
+</div>
+</body></html>
+"""
+
+_ta_cards = ta.parse_alert_cards(_ta_listing_html)
+check("finds all 3 real alerts from the screenshot", len(_ta_cards) == 3)
+check(
+    "titles and subtitles parsed correctly",
+    _ta_cards[1]["title"] == "M6 - Between J15 and J16 - Carriageway Closure"
+    and _ta_cards[1]["subtitle"] == "Staffordshire - Road traffic collision - Expect Delays - Northbound",
+)
+
+
+class _FakeTaResp:
+    def __init__(self, data):
+        self._data = data.encode()
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+import urllib.request as _urllib_request
+
+_original_ta_urlopen = _urllib_request.urlopen
+_urllib_request.urlopen = lambda req, timeout=60: _FakeTaResp(_ta_listing_html)
+try:
+    _ta_m6_results = ta.fetch_from_travel_alerts("M6")
+    _ta_a31_results = ta.fetch_from_travel_alerts("A31")
+finally:
+    _urllib_request.urlopen = _original_ta_urlopen
+
+check("M6 filter finds exactly the real M6 collision", len(_ta_m6_results) == 1)
+_ta_m6 = _ta_m6_results[0]
+check("direction correctly extracted", _ta_m6["direction"] == "Northbound")
+check("cause correctly extracted", _ta_m6["cause_type"] == "Road traffic collision")
+check("validity_status is always 'active'", _ta_m6["validity_status"] == "active")
+check(
+    "no start/end time -- honest representation, since the source has none",
+    _ta_m6["start_datetime"] == "" and _ta_m6["end_datetime"] == "",
+)
+check("source_label correctly set", _ta_m6["source_label"] == "Travel Alert (major incident)")
+
+_ta_rows = matching.rows_for_leg(_ta_m6_results, "M6", "Northbound", 15, 20)
+check("correctly matches an M6 J15-20 style leg", len(_ta_rows) == 1)
+
+check("A31 filter also finds exactly 1", len(_ta_a31_results) == 1)
+check(
+    "A31's cleaned location has no usable junction (M27's correctly stripped)",
+    matching._junctions_in_text(_ta_a31_results[0]["location_description"]) == [],
+)
+
+section("matching: BOTH_DIRECTIONS_VALUES wildcard (real Travel Alerts case)")
+
+_both_directions_closure = {
+    "road_name": "M6", "direction": "Both directions",
+    "location_description": "M6 between J15 and J16",
+}
+check(
+    "'Both directions' matches a Northbound leg",
+    matching.closure_matches_leg(_both_directions_closure, "M6", "northBound", 15, 20),
+)
+check(
+    "'Both directions' ALSO matches a Southbound leg (same closure, relevant to both)",
+    matching.closure_matches_leg(_both_directions_closure, "M6", "southBound", 15, 20),
+)
+_normal_directional_closure = {
+    "road_name": "M6", "direction": "southBound", "location_description": "M6 J40 to J39",
+}
+check(
+    "normal single-direction closures are unaffected by the wildcard",
+    matching.closure_matches_leg(_normal_directional_closure, "M6", "southBound", 45, 26)
+    and not matching.closure_matches_leg(_normal_directional_closure, "M6", "northBound", 45, 26),
+)
+check(
+    "blank/missing direction is still NOT treated as a wildcard (unchanged existing behavior)",
+    not matching.closure_matches_leg(
+        {"road_name": "M6", "direction": "", "location_description": "M6 J40"},
+        "M6", "southBound", 45, 26,
+    ),
+)
 
 
 # =======================================================================
