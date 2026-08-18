@@ -100,9 +100,9 @@ rows = matching.rows_for_leg(closures, "M6", "southBound", 45, 26)
 check(
     "descending order (45 -> 26) regardless of start_datetime",
     [r["location"] for r in rows] == [
-        "M6 southbound between J45 and J44",
-        "M6 southbound between J30 and J29",
-        "M6 southbound between J27 and J26",
+        "M6 S J44-J45",
+        "M6 S J29-J30",
+        "M6 S J26-J27",
     ],
 )
 
@@ -194,7 +194,11 @@ gretna_style = {
 }
 rows = matching.rows_for_leg([gretna_style], "M74", "Northbound", 22, 8)
 check("matched via comment fallback", len(rows) == 1)
-check("'near J22' annotation added since location itself has no junction", "near J22" in rows[0]["location"])
+check(
+    "'(near)' qualifier added since location itself has no junction "
+    "(junction 22 only came from the comment fallback)",
+    rows[0]["location"] == "M74 N J22 (near)",
+)
 
 section("matching: cross-check dedup by record_id")
 

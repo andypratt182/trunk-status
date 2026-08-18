@@ -204,6 +204,25 @@ def choose_icon(row: dict) -> str:
     return ICON_ROADWORKS
 
 
+def format_location(road_name: str, direction_letter: str, junctions: list[int]) -> str:
+    """Build a consistent 'M74 S J9' style location summary from
+    already-extracted structured fields, rather than displaying each
+    source's own free-text location description verbatim -- which
+    varies wildly in format across this project's sources: direction
+    sometimes appears right after the road name, sometimes at the very
+    end of the string (Traffic Scotland's raw text, e.g. "M74 J8 - J9
+    SB"); junctions are sometimes "J9", sometimes "Jct 9"; some sources
+    spell "northbound" out in a full descriptive sentence instead of an
+    abbreviation at all (National Highways' traffic-search API)."""
+    parts = [road_name]
+    if direction_letter:
+        parts.append(direction_letter)
+    if junctions:
+        uniq = sorted(set(junctions))
+        parts.append(f"J{uniq[0]}" if len(uniq) == 1 else f"J{uniq[0]}-J{uniq[-1]}")
+    return " ".join(parts)
+
+
 def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
                   j_from: int | None, j_to: int | None) -> list[dict]:
     matches = [
@@ -224,25 +243,40 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
 
     rows = []
     for c in matches:
-        location_text = c.get("location_description") or c.get("comment") or "\u2014"
+        raw_location = c.get("location_description") or ""
+        raw_comment = c.get("comment") or ""
+        resolved_road = resolve_road_name(c) or road_name
+        direction_display = data_direction[0].upper() if data_direction else ""
 
-        # If the displayed location has no junction number of its own but
-        # matching/sorting still found one (via the comment fallback in
-        # extract_junctions() -- e.g. a diversion instruction like "leave
-        # the motorway at J22"), surface it so there's never a gap between
-        # why a row is positioned where it is and what's visible about it.
-        # Worded as "near" since a diversion-derived number is an inferred
-        # proxy for the closure's location, not a stated fact about it.
-        if not _junctions_in_text(c.get("location_description") or ""):
-            fallback_junctions = extract_junctions(c)
-            if fallback_junctions:
-                uniq = sorted(set(fallback_junctions))
-                note = "/".join(f"J{j}" for j in uniq)
-                location_text = f"{location_text} \u2014 near {note}"
+        all_junctions = extract_junctions(c)  # location first, falls back to comment
+        junctions_from_location_text = _junctions_in_text(raw_location)
+        used_fallback = bool(all_junctions) and not junctions_from_location_text
+
+        if resolved_road:
+            location_text = format_location(resolved_road, direction_display, all_junctions)
+            # Worded as "near" since a comment-derived junction is an
+            # inferred proxy for the closure's location (e.g. a diversion
+            # instruction like "leave the motorway at J22"), not a stated
+            # fact about where the closure itself actually is.
+            if used_fallback:
+                location_text += " (near)"
+        else:
+            # Nothing structured enough to build a clean summary from --
+            # fall back to whatever raw text is available rather than
+            # showing just a bare direction letter with no road name.
+            location_text = raw_location or raw_comment or "\u2014"
+
+        # The normalized summary above is deliberately terser than each
+        # source's own free text -- preserve that original detail (place
+        # names, closure type, lane specifics) in the comment instead of
+        # discarding it, so nothing is actually lost, just moved out of
+        # the at-a-glance label into the collapsible More Info section.
+        extra_detail = raw_location if raw_location and raw_location != raw_comment else ""
+        combined_comment = " \u2014 ".join(p for p in (extra_detail, raw_comment) if p)
 
         row = {
             "location": location_text,
-            "comment": c.get("comment") or "",
+            "comment": combined_comment,
             "start": format_dt(c.get("start_datetime", "")),
             "end": format_dt(c.get("end_datetime", "")),
             "start_iso": c.get("start_datetime") or "",
