@@ -174,7 +174,6 @@ _ACCIDENT_KEYWORDS = (
     "congestion", "queue", "breakdown", "off strategic network incident",
     "road traffic incident",
 )
-_SLIP_ROAD_KEYWORDS = ("slip road", "slip off", "slip on", "offslip", "onslip", "on-slip", "off-slip")
 _FULL_CLOSURE_KEYWORDS = ("total closure", "road closure", "carriageway closure", "full closure")
 _LANE_CLOSURE_KEYWORDS = ("lane closure", "lanes restricted")
 
@@ -186,16 +185,26 @@ def choose_icon(row: dict) -> str:
     accident/incident > slip road > full closure > lane restriction >
     generic roadworks (the fallback when nothing more specific matched).
     """
+    location = (row.get("location") or "").lower()
     haystack = " ".join(str(x).lower() for x in (
         row.get("cause") or "",
-        row.get("location") or "",
         row.get("comment") or "",
         row.get("lane_info") or "",
     ))
 
     if any(k in haystack for k in _ACCIDENT_KEYWORDS):
         return ICON_ACCIDENT
-    if any(k in haystack for k in _SLIP_ROAD_KEYWORDS):
+    # Checks the already-normalized location qualifier (e.g. "(Exit Slip
+    # Road)") rather than independently re-scanning comment/diversion
+    # text with a separate keyword list -- diversion instructions often
+    # mention rejoining the motorway "on slip" as an incidental routing
+    # detail unrelated to whether the closure itself is slip-road-
+    # specific (a real bug this guards against: a mainline Jct 7 to Jct 8
+    # closure was misclassified because its diversion said "...rejoin
+    # M74 south jct 8 on slip"). Checking the qualifier instead of raw
+    # text also guarantees the icon and the visible location text can
+    # never disagree with each other.
+    if "slip road" in location:
         return ICON_SLIP_ROAD
     if any(k in haystack for k in _FULL_CLOSURE_KEYWORDS) or row.get("lanes_operational") == 0:
         return ICON_ROAD_CLOSED
@@ -283,7 +292,15 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         all_junctions = extract_junctions(c)  # location first, falls back to comment
         junctions_from_location_text = _junctions_in_text(raw_location)
         used_fallback = bool(all_junctions) and not junctions_from_location_text
-        slip_road = detect_slip_road(f"{raw_location} {raw_comment}")
+        # Deliberately scans ONLY the raw location text, not raw_comment
+        # -- diversion instructions frequently mention rejoining the
+        # motorway "on slip" as an incidental routing detail, which has
+        # nothing to do with whether the CLOSURE ITSELF is a slip-road
+        # closure. Real bug this guards against: a mainline "M74 SB Jct 7
+        # to Jct 8 - Road closure" whose diversion said "...rejoin M74
+        # south jct 8 on slip" was being misclassified as a slip-road
+        # closure entirely because of that incidental mention.
+        slip_road = detect_slip_road(raw_location)
 
         if resolved_road:
             qualifiers = []

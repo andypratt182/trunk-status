@@ -125,13 +125,28 @@ check(
     }) == matching.ICON_ACCIDENT,
 )
 check(
-    "real M74 J9 Offslip total closure -> slip road icon (location detail wins over generic roadworks cause)",
+    "real M74 J9 Offslip total closure -> slip road icon "
+    "(checks the already-normalized location qualifier, which is what choose_icon() "
+    "actually receives in real usage -- rows_for_leg always normalizes location first)",
     matching.choose_icon({
         "cause": "Barrier Repair, Filter Drain, Inspections, Sign Installation/Repairs",
-        "location": "M74 J9 Offslip SB -Total Closure",
+        "location": "M74(S) J9 (Exit Slip Road)",
         "comment": "Diversion: Follow mainline closure", "lane_info": "Road Closure.",
         "lanes_restricted": None, "lanes_operational": None,
     }) == matching.ICON_SLIP_ROAD,
+)
+check(
+    "real bug this guards against: a diversion mentioning 'rejoin ... on slip' as an "
+    "incidental routing detail must NOT make a genuine mainline closure look like a "
+    "slip-road one -- confirmed by checking a normalized location WITHOUT the slip "
+    "qualifier (since detect_slip_road only scans raw location text, not diversions)",
+    matching.choose_icon({
+        "cause": "Grass Cutting", "location": "M74(S) J7-J8",
+        "comment": "Diversion: leave M74 Jct 7- at jct turn left onto A72 Lanark Rd- at "
+                   "jct turn left onto onto B7808 Ayr Rd- at rbt take 1st exit onto A71- "
+                   "rejoin M74 south jct 8 on slip.",
+        "lane_info": "Road Closure.", "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_ROAD_CLOSED,
 )
 check(
     "National Highways roadMaintenance WITH a real lane-restriction number -> lane closure icon (impact-based)",
@@ -198,6 +213,31 @@ check(
     "no slip mention -> empty string, and 'on' elsewhere doesn't false-positive",
     matching.detect_slip_road("M6 southbound between J40 and J39, Lane 3 closure") == ""
     and matching.detect_slip_road("Road maintenance on the hard shoulder") == "",
+)
+
+section("matching: rows_for_leg -- real reported bug, diversion text falsely triggering slip-road detection")
+
+_real_m74_j7j8_closure = {
+    "road_name": "M74", "direction": "Southbound",
+    "location_description": "M74 SB Jct 7 to Jct 8 - Road closure",
+    "comment": "Diversion: leave M74 Jct 7- at jct turn left onto A72 Lanark Rd- at jct "
+               "turn left onto onto B7808 Ayr Rd- at rbt take 1st exit onto A71- rejoin "
+               "M74 south jct 8 on slip.",
+    "cause_type": "Grass Cutting", "lane_info": "Road Closure.",
+    "lanes_restricted": None, "lanes_operational": None, "source_label": "Traffic Scotland (scraped)",
+    "start_datetime": "2026-09-21T20:00:00", "end_datetime": "2026-09-22T06:00:00",
+    "validity_status": "planned",
+}
+_real_rows = matching.rows_for_leg([_real_m74_j7j8_closure], "M74", "southBound", 7, 8)
+check("one row produced", len(_real_rows) == 1)
+check(
+    "location correctly shows a plain mainline closure -- the diversion's incidental "
+    "'...rejoin M74 south jct 8 on slip' must NOT add a false '(Exit Slip Road)' qualifier",
+    _real_rows[0]["location"] == "M74(S) J7-J8",
+)
+check(
+    "icon correctly shows a full road closure, not a slip-road closure",
+    _real_rows[0]["icon"] == matching.ICON_ROAD_CLOSED,
 )
 
 section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
