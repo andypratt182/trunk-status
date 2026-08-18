@@ -160,23 +160,19 @@ button:focus-visible {
   margin-right: 4px;
 }
 .leg-chain-mini {
-  margin-top: 5px;
+  margin: 5px 0 0;
+  padding: 0;
+  list-style: none;
   font-size: 0.74rem;
   color: var(--text-muted);
-  line-height: 1.9;
 }
-/* Each road+junction pair (with its preceding arrow) wraps as one
-   unbreakable unit, so a narrow screen never splits a junction range
-   like "J45-J26" mid-way across two lines -- wrapping only ever
-   happens between whole legs instead. */
-.mini-leg {
-  display: inline-flex;
+.leg-chain-mini li {
+  display: flex;
   align-items: center;
-  white-space: nowrap;
-  margin-right: 4px;
+  margin-top: 4px;
 }
+.leg-chain-mini li:first-child { margin-top: 0; }
 .leg-chain-mini .mini-junc { margin-left: 2px; }
-.leg-chain-mini .mini-arrow { color: var(--amber); }
 
 /* --- Journey strip signature element (route page): the whole chain of
    legs for a direction, e.g. [M6 J45<->J26] -> [M58 full] -> [M57 J6<->J4] */
