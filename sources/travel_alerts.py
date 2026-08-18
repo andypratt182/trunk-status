@@ -137,12 +137,20 @@ def parse_alert_cards(html: str) -> list[dict]:
     return results
 
 
-def fetch_from_travel_alerts(road_name: str) -> list[dict]:
-    """Fetch current Travel Alerts and filter to ones whose title starts
-    with road_name. Returns closures in the standard flat record shape --
-    with no start/end time (see module docstring) and validity_status
-    always "active" (an alert only appears on this page while it's
-    ongoing; National Highways removes it once resolved)."""
+# The listing page covers the whole English network, and each configured
+# road filters the same page -- so with several roads configured, this
+# would otherwise re-download an identical page once per road, every
+# build. Cached for the lifetime of the process (one build run), which
+# is exactly the right scope: fresh data every build, fetched once.
+_page_cache: dict[str, str | None] = {}
+
+
+def fetch_listing_page() -> str | None:
+    """Fetch the Travel Alerts listing page, once per build. Returns None
+    if the fetch failed (already logged)."""
+    if TRAVEL_ALERTS_URL in _page_cache:
+        return _page_cache[TRAVEL_ALERTS_URL]
+
     print(f"Fetching {TRAVEL_ALERTS_URL} ...")
     req = urllib.request.Request(TRAVEL_ALERTS_URL, headers={"User-Agent": "route-closures-build/1.0"})
     try:
@@ -150,9 +158,23 @@ def fetch_from_travel_alerts(road_name: str) -> list[dict]:
             html = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         print(f"Warning: HTTP {e.code} {e.reason} fetching Travel Alerts -- skipping this source.")
-        return []
+        html = None
     except Exception as e:  # noqa: BLE001 -- this source is best-effort, never fatal
         print(f"Warning: failed to fetch Travel Alerts ({e}) -- skipping this source.")
+        html = None
+
+    _page_cache[TRAVEL_ALERTS_URL] = html
+    return html
+
+
+def fetch_from_travel_alerts(road_name: str) -> list[dict]:
+    """Fetch current Travel Alerts and filter to ones whose title starts
+    with road_name. Returns closures in the standard flat record shape --
+    with no start/end time (see module docstring) and validity_status
+    always "active" (an alert only appears on this page while it's
+    ongoing; National Highways removes it once resolved)."""
+    html = fetch_listing_page()
+    if html is None:
         return []
 
     cards = parse_alert_cards(html)

@@ -223,12 +223,19 @@ def parse_incident_cards(html: str) -> list[dict]:
     return results
 
 
-def fetch_from_scotland_incidents(road_name: str = "M74") -> list[dict]:
-    """Fetch current Traffic Scotland incidents and filter to ones whose
-    heading mentions road_name (checking the M74/A74(M) alias). Returns
-    closures in the standard flat record shape -- with no end time (see
-    module docstring) and validity_status always "active"."""
-    aliases = ROAD_ALIASES.get(road_name, {road_name})
+# The listing page covers Scotland's whole trunk road network, and each
+# configured road filters the same page -- so with several roads
+# configured, this would otherwise re-download an identical page once
+# per road, every build. Cached for the lifetime of the process (one
+# build run): fresh data every build, fetched once.
+_page_cache: dict[str, str | None] = {}
+
+
+def fetch_listing_page() -> str | None:
+    """Fetch the incidents listing page, once per build. Returns None if
+    the fetch failed (already logged)."""
+    if INCIDENTS_URL in _page_cache:
+        return _page_cache[INCIDENTS_URL]
 
     print(f"Fetching {INCIDENTS_URL} ...")
     req = urllib.request.Request(INCIDENTS_URL, headers={"User-Agent": "route-closures-build/1.0"})
@@ -237,9 +244,24 @@ def fetch_from_scotland_incidents(road_name: str = "M74") -> list[dict]:
             html = resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         print(f"Warning: HTTP {e.code} {e.reason} fetching Traffic Scotland incidents -- skipping this source.")
-        return []
+        html = None
     except Exception as e:  # noqa: BLE001 -- this source is best-effort, never fatal
         print(f"Warning: failed to fetch Traffic Scotland incidents ({e}) -- skipping this source.")
+        html = None
+
+    _page_cache[INCIDENTS_URL] = html
+    return html
+
+
+def fetch_from_scotland_incidents(road_name: str = "M74") -> list[dict]:
+    """Fetch current Traffic Scotland incidents and filter to ones whose
+    heading mentions road_name (checking the M74/A74(M) alias). Returns
+    closures in the standard flat record shape -- with no end time (see
+    module docstring) and validity_status always "active"."""
+    aliases = ROAD_ALIASES.get(road_name, {road_name})
+
+    html = fetch_listing_page()
+    if html is None:
         return []
 
     cards = parse_incident_cards(html)
