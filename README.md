@@ -30,6 +30,29 @@ new build — this is why a CSS fix can sometimes not show up on a phone
 even after a successful rebuild. The hash only changes when the file's
 actual content changes, so it doesn't force a refetch on every rebuild.
 
+## More Info column
+
+Diversion text (Traffic Scotland: `"Diversion: <text>"`, added by
+`sources/traffic_scotland.py` itself, not part of the raw source) and
+XLSX advance-notice's "Overall Scheme Details" text were previously
+shown inline under Location, which cluttered it — especially for the
+many M74 entries that have a diversion. Moved to its own column, between
+End and Source, as a native HTML `<details>/<summary>` disclosure — the
+collapse/expand behaviour (including the triangle marker) comes free
+from the browser, no JS needed. Only rendered when `row.comment` is set
+and differs from `row.location` (unchanged from before, just relocated).
+
+The empty case needed care: Jinja's default whitespace handling leaves
+newlines/indentation in the output even when the `{% if %}` is false, so
+a naive `{% if %}...{% endif %}` inside the `<td>` produces whitespace,
+not a truly empty element — and CSS's `:empty` selector (used to
+collapse this cell's own padding when there's nothing in it) requires
+exactly zero child nodes, including whitespace text nodes, to match.
+Fixed with Jinja's `{%-`/`-%}` trim markers placed so the `<td>` renders
+as `<td ...></td>` with literally zero characters between the tags when
+there's no comment — confirmed with a test that checks the raw rendered
+HTML, not just that the visible page looks right.
+
 ## Row icons
 
 Each closure/incident row shows a small icon (`static/logos/*.png`),
@@ -56,6 +79,30 @@ regenerated or overwritten by any build step. `build.py`'s existing
 directory on every build, so nothing extra was needed to make icons
 ship correctly — dropping a new PNG in `static/logos/` and referencing
 its filename in `choose_icon()` is the entire integration surface.
+
+**Desktop**: its own dedicated column between Status and Location
+(`<th class="icon-header">`/`<td class="icon-cell">`).
+
+**Mobile card view**: the icon (80×45px, larger than the 20×20px desktop
+column version) is pinned to the card's top-right corner via
+`position: absolute`, aligned with the top of Status and matching the
+card's own padding (14px/16px) on both the top and right — not its own
+full-width card row like every other field, and not left to wherever it
+happens to fall in document flow. This went through two earlier
+approaches first: `position: absolute` was tried originally, but
+abandoned when the icon was sized much larger (160×90) and visibly
+covered the Location heading underneath it, since absolute positioning
+removes an element from the document flow entirely and nothing else
+"knows" to leave room for it. Switched to `float: right`, which let text
+wrap around it automatically at any size — safer, but positioned the
+icon wherever it fell in flow (next to Location) rather than at the
+card's actual top-right corner. Back to `position: absolute` once the
+icon settled at 80×45, confirmed visually (not assumed) that there's no
+overlap with Location's text at this smaller size. Requires the `<tr>`
+itself to be `position: relative`, since the card's border/padding/
+rounded corners all live on the `<tr>` in this design, not a wrapping
+`<div>`. Its own `::before` "TYPE" label is suppressed — a corner icon
+like this reads as decoration, not a labelled field like the others.
 
 ## Project structure
 

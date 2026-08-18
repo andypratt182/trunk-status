@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 
@@ -1411,6 +1412,53 @@ finally:
 check(
     "a mismatched road is excluded even if the (already server-filtered) API somehow returned one",
     len(_nhts_filtered) == 1 and _nhts_filtered[0]["road_name"] == "M6",
+)
+
+
+# =======================================================================
+# templates/route.html: More Info disclosure cell
+# =======================================================================
+
+section("route.html: More Info cell renders truly empty (not just whitespace) when there's no comment")
+
+from jinja2 import Environment as _JinjaEnv, FileSystemLoader as _JinjaLoader
+_env = _JinjaEnv(loader=_JinjaLoader("templates"))
+
+_row_no_comment = {
+    "status": "planned", "icon": "roadworks.png", "location": "M6 J1",
+    "comment": "", "lane_info": "", "lanes_restricted": None, "lanes_operational": None,
+    "cause": "Road maintenance", "start": "1 Jan", "end": "2 Jan",
+    "start_iso": "", "end_iso": "", "source_label": "Feed",
+}
+_row_with_comment = dict(_row_no_comment, comment="Diversion: Follow mainline closure")
+_leg = {"road_name": "M6", "badge_class": "badge-motorway", "junction_from": 1, "junction_to": 2,
+        "count": 2, "rows": [_row_no_comment, _row_with_comment]}
+
+_html = _env.get_template("route.html").render(
+    site_title="X", route_name="X", direction_label="X", leg_groups=[_leg],
+    generated_at="X", feed_updated="X", style_hash="", script_hash="",
+)
+
+_more_info_cells = re.findall(r'<td class="more-info-cell"[^>]*>.*?</td>', _html, re.S)
+check("both rows produced a more-info-cell", len(_more_info_cells) == 2)
+
+_empty_inner = _more_info_cells[0].split(">", 1)[1].rsplit("<", 1)[0]
+check(
+    "empty-comment case renders with ZERO characters between the tags -- not just visually "
+    "empty, since CSS :empty (used to collapse this cell's padding) requires that exactly; "
+    "a real bug caught here: the original template left whitespace/newlines even when the "
+    "{% if %} was false, which :empty does not match",
+    _empty_inner == "",
+)
+check(
+    "the comment case correctly contains the disclosure with the real comment text",
+    "<details>" in _more_info_cells[1] and "Diversion: Follow mainline closure" in _more_info_cells[1],
+)
+check(
+    "Location cell no longer duplicates the comment text (moved to More Info instead)",
+    "Diversion: Follow mainline closure" not in re.search(
+        r'<td class="location-cell"[^>]*>.*?</td>', _html, re.S
+    ).group(0),
 )
 
 
