@@ -174,66 +174,43 @@ button:focus-visible {
 .leg-chain-mini li:first-child { margin-top: 0; }
 .leg-chain-mini .mini-junc { margin-left: 2px; }
 
-/* --- Journey strip signature element (route page): the whole chain of
-   legs for a direction, e.g. [M6 J45<->J26] -> [M58 full] -> [M57 J6<->J4] */
-.journey-strip {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+/* --- Journey list (route page): the whole chain of legs for a
+   direction, e.g. M74 J8 -> J22 / M6 J45 -> J26 / M58 Entire road /
+   M57 J6 -> J4, one leg per line. A plain list works cleanly at any
+   width, so unlike the old node/dashed-line design this needs no
+   separate mobile layout at all. */
+.journey-list {
   margin: 20px 0 32px;
   padding: 16px 18px;
+  list-style: none;
   background: var(--panel);
   border: 1px solid var(--panel-border);
   border-radius: var(--radius);
 }
-.journey-leg {
+.journey-list li {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 8px;
+  margin-top: 10px;
 }
-.journey-arrow {
+.journey-list li:first-child { margin-top: 0; }
+.journey-junc {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: #fff;
+}
+.journey-arrow-inline {
   color: var(--amber);
-  font-size: 1.2rem;
-  align-self: center;
-  margin: 0 2px;
+  font-size: 0.9rem;
 }
-.journey-node-full {
+.journey-full {
   font-family: var(--font-mono);
   font-size: 0.72rem;
   font-weight: 600;
   color: #fff;
-  padding: 6px 12px;
+  padding: 4px 10px;
   border-radius: 20px;
-}
-
-.junction-strip {
-  display: flex;
-  align-items: center;
-  width: 130px;
-}
-.journey-node {
-  flex: 0 0 auto;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-mono);
-  font-weight: 700;
-  font-size: 0.74rem;
-  color: #fff;
-  border: 2px solid rgba(255,255,255,0.15);
-}
-.junction-line {
-  flex: 1 1 auto;
-  height: 3px;
-  margin: 0 3px;
-  background-image: repeating-linear-gradient(
-    90deg, var(--amber) 0 7px, transparent 7px 13px
-  );
 }
 
 /* --- Leg sections within a route page --- */
@@ -401,27 +378,6 @@ footer.site-footer {
 @media (max-width: 640px) {
   .site-header .wrap { flex-direction: column; align-items: flex-start; }
   .feed-meta { text-align: left; }
-
-  /* The horizontal flex-wrap layout doesn't wrap sensibly at this width
-     -- arrows can end up floating in the wrong position relative to the
-     legs they're meant to separate. A vertical stepper (same DOM order:
-     leg, arrow, leg, arrow, leg) reads correctly at any width instead. */
-  .journey-strip {
-    flex-direction: column;
-    align-items: center;
-    gap: 6px;
-  }
-  .journey-arrow {
-    transform: rotate(90deg);
-    margin: 2px 0;
-  }
-  /* Keep each leg's road badge and its junctions on one line (e.g.
-     "M74  J8 --- J22"), rather than stacking the badge above the
-     junction pair -- more compact and easier to scan as a single row. */
-  .journey-leg {
-    flex-direction: row;
-    gap: 10px;
-  }
 
   /* Closures table -> one bordered card per closure, each field labeled
      above its value, no horizontal scrolling. Same underlying <tr>/<td>
