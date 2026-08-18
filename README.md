@@ -339,12 +339,24 @@ direction's leg — real Travel Alerts frequently report this (2 of the
 neither a route's northbound nor southbound leg, silently dropping the
 alert from both. See `matching.BOTH_DIRECTIONS_VALUES`.
 
-**Unverified against live markup** (same caveat as Traffic Scotland's
-listing page, for the same reason — this project's fetch tooling
-converts pages to text, never exposing raw HTML). If a live run logs
-`found 0 total alert(s)`, check `parse_alert_cards()` in
-`sources/travel_alerts.py` against the page's real structure. A parsing
-failure here is a warning, not a build-breaking error.
+**A real "found 0 total alert(s)" bug was caught and fixed.** A live run
+found 0 alerts on a day the page genuinely had 4 (A31, A303, A45, M1,
+confirmed by fetching the page directly). Root cause: the real page
+wraps each *entire* card (title + subtitle + "More details") in one
+`<a>` with nested child elements, and `find_all("a", string=lambda...)`
+— which every scraper in this project originally used to find "More
+details" links — relies on BeautifulSoup's `.string` property, which
+silently returns `None` (matching nothing) for any tag with more than
+one child, even simple ones. Fixed by using `get_text()` instead, which
+handles both a simple single-text link and a nested one correctly. Also
+applied defensively to the two Scotland scrapers, which happened to work
+by luck (their real "More details" links are simple single-text anchors)
+but relied on the same fragile assumption. The test fixture for this
+source was rewritten to use the real nested-anchor structure and the
+real 4 alerts from that live check — the old fixture used a
+simple-anchor structure that could never have caught this class of bug.
+A parsing failure here is still just a warning, never a build-breaking
+error.
 
 ## Additional source: advance-notice full closures (XLSX)
 

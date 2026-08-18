@@ -935,34 +935,58 @@ check(
     ) == [15, 16],
 )
 
-section("travel_alerts: parse_alert_cards + fetch_from_travel_alerts (real screenshot content)")
+section("travel_alerts: parse_alert_cards + fetch_from_travel_alerts (real page structure + real content)")
 
+# The real page turned out to wrap each ENTIRE card (title + subtitle +
+# "More details") in one <a> with nested child elements -- NOT a simple
+# separate "More details" link like earlier synthetic fixtures assumed.
+# That assumption is exactly what let a real bug slip through undetected:
+# find_all("a", string=lambda...) silently matches nothing when an anchor
+# has multiple children, since BeautifulSoup's .string only works for a
+# tag with exactly one text-only child. A live run found "0 total alerts"
+# on a day the page genuinely had 4 -- this fixture uses the real,
+# confirmed structure and the real 4 alerts from that same live check, so
+# this test would actually have caught the bug it's guarding against.
 _ta_listing_html = """
 <html><body>
-<div class="alert-card">
+<a href="/roads-and-travel/live-travel-updates/travel-alerts/a31-hampshire-both-directions-fire-road-closed-between-m27-j2-and-a338/">
   <h2>A31 - Between M27 J2 and A338 - Road Closure</h2>
   <p>Hampshire - Off strategic network incident - Expect Delays - Both directions</p>
-  <a href="/roads-and-travel/live-travel-updates/travel-alerts/a31-hampshire-both-directions-fire-road-closed-between-m27-j2-and-a338/">More details</a>
-</div>
-<div class="alert-card">
+  <span>More details</span>
+</a>
+<a href="/roads-and-travel/live-travel-updates/travel-alerts/a303-somersetdevon-westbound-road-closed-hgv-fire-between-a358-and-a30/">
+  <h2>A303 - Between A358 and A30 - Road Closure</h2>
+  <p>Somerset - Vehicle fire - Expect Delays - Westbound</p>
+  <span>More details</span>
+</a>
+<a href="/roads-and-travel/live-travel-updates/travel-alerts/a45-northamptonshire-both-directions-road-closed-between-a43-and-a509/">
+  <h2>A45 - Between A43 and A509 - Road Closure</h2>
+  <p>Northamptonshire - Police led incident - Expect Delays - Both directions</p>
+  <span>More details</span>
+</a>
+<a href="/roads-and-travel/live-travel-updates/travel-alerts/m1-northamptonshire-northbound-collision-carriageway-closed-between-j16-and-j18/">
+  <h2>M1 - Between J16 and J18 - Carriageway Closure</h2>
+  <p>Northamptonshire - Road traffic collision - Expect Delays - Northbound</p>
+  <span>More details</span>
+</a>
+<!-- Synthetic (not on the page the day this was checked) -- M1 isn't in
+     this project's own route config, so this keeps a test exercising a
+     road that actually is (M6), using the same real nested structure. -->
+<a href="/roads-and-travel/live-travel-updates/travel-alerts/m6-staffordshire-northbound-road-traffic-collision-carriageway-closed-j15-j16/">
   <h2>M6 - Between J15 and J16 - Carriageway Closure</h2>
   <p>Staffordshire - Road traffic collision - Expect Delays - Northbound</p>
-  <a href="/roads-and-travel/live-travel-updates/travel-alerts/m6-staffordshire-northbound-road-traffic-collision-carriageway-closed-j15-j16/">More details</a>
-</div>
-<div class="alert-card">
-  <h2>A303 - Between A358 and A30 - Road Closure</h2>
-  <p>Somerset - Vehicle fire - Expect Delays - Both directions</p>
-  <a href="/roads-and-travel/live-travel-updates/travel-alerts/a303-somerset-both-directions-vehicle-fire-road-closed/">More details</a>
-</div>
+  <span>More details</span>
+</a>
 </body></html>
 """
 
 _ta_cards = ta.parse_alert_cards(_ta_listing_html)
-check("finds all 3 real alerts from the screenshot", len(_ta_cards) == 3)
+check("finds all 5 alerts (4 real + 1 synthetic M6)", len(_ta_cards) == 5)
+_ta_m1 = next(c for c in _ta_cards if c["title"].startswith("M1"))
 check(
-    "titles and subtitles parsed correctly",
-    _ta_cards[1]["title"] == "M6 - Between J15 and J16 - Carriageway Closure"
-    and _ta_cards[1]["subtitle"] == "Staffordshire - Road traffic collision - Expect Delays - Northbound",
+    "title and subtitle correctly isolated from a nested anchor (not merged into one blob)",
+    _ta_m1["title"] == "M1 - Between J16 and J18 - Carriageway Closure"
+    and _ta_m1["subtitle"] == "Northamptonshire - Road traffic collision - Expect Delays - Northbound",
 )
 
 
