@@ -344,16 +344,13 @@ table.closures tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 .location-cell { max-width: 320px; }
-.location-with-icon {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
+.icon-header, .icon-cell {
+  width: 32px;
+  text-align: center;
 }
 .row-icon {
-  flex: 0 0 auto;
   width: 20px;
   height: 20px;
-  margin-top: 2px;
   border-radius: 3px;
 }
 .location-cell .comment {
@@ -427,6 +424,23 @@ footer.site-footer {
     font-weight: 600;
     max-width: none;
   }
+  /* Icon sits to the right of Status, both on one line, with Location
+     starting a fresh line below -- rather than becoming its own full-
+     width row like every other field. Suppressing its own ::before
+     label since "Status [icon]" reads as one unit; a second "TYPE"
+     label between them would visually split what's meant to look
+     unified. */
+  table.closures td[data-label="Status"],
+  table.closures td.icon-cell {
+    display: inline-block;
+    width: auto;
+    vertical-align: middle;
+  }
+  table.closures td.icon-cell {
+    margin-left: 10px;
+    padding-top: 0;
+  }
+  table.closures td.icon-cell::before { content: none; }
   /* table.closures tr { display: block; } above has higher specificity
      than the browser's default [hidden] { display: none; }, which would
      otherwise leave day-filter/live-status-hidden rows visibly showing
