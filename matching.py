@@ -204,8 +204,32 @@ def choose_icon(row: dict) -> str:
     return ICON_ROADWORKS
 
 
-def format_location(road_name: str, direction_letter: str, junctions: list[int]) -> str:
-    """Build a consistent 'M74 S J9' style location summary from
+# "on"/"off" can appear either side of "slip" depending on the source --
+# "Offslip" (no separator), "off-slip", "off slip", or reversed as
+# "slip off" -- all seen in real data. Whichever group matches gives the
+# direction regardless of which side of "slip" it's on.
+_SLIP_DIRECTION_RE = re.compile(r'\b(?:(on|off)[\s-]?slip|slip[\s-]?(on|off))\b', re.IGNORECASE)
+_SLIP_ROAD_RE = re.compile(r'\bslip\s*road\b', re.IGNORECASE)
+
+
+def detect_slip_road(text: str) -> str:
+    """Detect and normalize slip-road terminology, which varies wildly
+    across sources -- real examples seen: "Offslip", "slip off",
+    "Onslip", "on-slip", "Slip Off", "slip road". Returns "Entry Slip
+    Road", "Exit Slip Road", "Slip road" (direction unspecified), or ""
+    if no slip-road mention is found at all."""
+    m = _SLIP_DIRECTION_RE.search(text)
+    if m:
+        direction = (m.group(1) or m.group(2)).lower()
+        return "Entry Slip Road" if direction == "on" else "Exit Slip Road"
+    if _SLIP_ROAD_RE.search(text):
+        return "Slip road"
+    return ""
+
+
+def format_location(road_name: str, direction_letter: str, junctions: list[int],
+                     qualifiers: list[str] | None = None) -> str:
+    """Build a consistent 'M74(S) J9' style location summary from
     already-extracted structured fields, rather than displaying each
     source's own free-text location description verbatim -- which
     varies wildly in format across this project's sources: direction
@@ -213,14 +237,22 @@ def format_location(road_name: str, direction_letter: str, junctions: list[int])
     end of the string (Traffic Scotland's raw text, e.g. "M74 J8 - J9
     SB"); junctions are sometimes "J9", sometimes "Jct 9"; some sources
     spell "northbound" out in a full descriptive sentence instead of an
-    abbreviation at all (National Highways' traffic-search API)."""
-    parts = [road_name]
-    if direction_letter:
-        parts.append(direction_letter)
+    abbreviation at all (National Highways' traffic-search API).
+    qualifiers (e.g. "Exit Slip Road", "near") are appended as one
+    combined parenthetical, e.g. "M74(S) J9 (Exit Slip Road)" --
+    normalizing slip-road terminology specifically was a deliberate
+    second pass after the first version of this function dropped it
+    entirely; it's real, useful information (a slip-road closure behaves
+    very differently from a mainline one), not just descriptive noise to
+    strip out."""
+    parts = [f"{road_name}({direction_letter})" if direction_letter else road_name]
     if junctions:
         uniq = sorted(set(junctions))
         parts.append(f"J{uniq[0]}" if len(uniq) == 1 else f"J{uniq[0]}-J{uniq[-1]}")
-    return " ".join(parts)
+    text = " ".join(parts)
+    if qualifiers:
+        text += f" ({', '.join(qualifiers)})"
+    return text
 
 
 def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
@@ -251,15 +283,19 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         all_junctions = extract_junctions(c)  # location first, falls back to comment
         junctions_from_location_text = _junctions_in_text(raw_location)
         used_fallback = bool(all_junctions) and not junctions_from_location_text
+        slip_road = detect_slip_road(f"{raw_location} {raw_comment}")
 
         if resolved_road:
-            location_text = format_location(resolved_road, direction_display, all_junctions)
+            qualifiers = []
+            if slip_road:
+                qualifiers.append(slip_road)
             # Worded as "near" since a comment-derived junction is an
             # inferred proxy for the closure's location (e.g. a diversion
             # instruction like "leave the motorway at J22"), not a stated
             # fact about where the closure itself actually is.
             if used_fallback:
-                location_text += " (near)"
+                qualifiers.append("near")
+            location_text = format_location(resolved_road, direction_display, all_junctions, qualifiers)
         else:
             # Nothing structured enough to build a clean summary from --
             # fall back to whatever raw text is available rather than

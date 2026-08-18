@@ -100,9 +100,9 @@ rows = matching.rows_for_leg(closures, "M6", "southBound", 45, 26)
 check(
     "descending order (45 -> 26) regardless of start_datetime",
     [r["location"] for r in rows] == [
-        "M6 S J44-J45",
-        "M6 S J29-J30",
-        "M6 S J26-J27",
+        "M6(S) J44-J45",
+        "M6(S) J29-J30",
+        "M6(S) J26-J27",
     ],
 )
 
@@ -182,6 +182,24 @@ check(
 )
 check("empty input -> empty output", matching.humanize_cause("") == "")
 
+section("matching: detect_slip_road (real and plausible terminology variants)")
+
+check(
+    "real terminology variants all normalize correctly",
+    matching.detect_slip_road("M74 J9 Offslip SB -Total Closure") == "Exit Slip Road"
+    and matching.detect_slip_road("M74 J5 (Raith) North - slip off") == "Exit Slip Road"
+    and matching.detect_slip_road("A737 M8-J29 North - Slip Off") == "Exit Slip Road"
+    and matching.detect_slip_road("M74 J8 Onslip NB") == "Entry Slip Road"
+    and matching.detect_slip_road("M6 on-slip closure at J40") == "Entry Slip Road"
+    and matching.detect_slip_road("M6 slip on closure") == "Entry Slip Road"
+    and matching.detect_slip_road("M74 slip road closure at J10") == "Slip road",
+)
+check(
+    "no slip mention -> empty string, and 'on' elsewhere doesn't false-positive",
+    matching.detect_slip_road("M6 southbound between J40 and J39, Lane 3 closure") == ""
+    and matching.detect_slip_road("Road maintenance on the hard shoulder") == "",
+)
+
 section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
 
 gretna_style = {
@@ -196,8 +214,10 @@ rows = matching.rows_for_leg([gretna_style], "M74", "Northbound", 22, 8)
 check("matched via comment fallback", len(rows) == 1)
 check(
     "'(near)' qualifier added since location itself has no junction "
-    "(junction 22 only came from the comment fallback)",
-    rows[0]["location"] == "M74 N J22 (near)",
+    "(junction 22 only came from the comment fallback) -- and 'Off-slip' "
+    "correctly detected too, since this real fixture's location text "
+    "genuinely mentions '(Off Slip)'",
+    rows[0]["location"] == "M74(N) J22 (Exit Slip Road, near)",
 )
 
 section("matching: cross-check dedup by record_id")

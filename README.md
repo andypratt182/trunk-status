@@ -30,6 +30,53 @@ new build — this is why a CSS fix can sometimes not show up on a phone
 even after a successful rebuild. The hash only changes when the file's
 actual content changes, so it doesn't force a refetch on every rebuild.
 
+## Normalized location display
+
+Each source formats its location text completely differently: Traffic
+Scotland's raw text puts the direction at the *end* of the string (e.g.
+"M74 J8 - J9 SB"), National Highways' traffic-search API spells
+"northbound" out in a full sentence ("The M6 northbound between
+junctions J9 and J11"), and junctions show up as both "J9" and "Jct 9"
+depending on the source. Rather than try to reformat each source's free
+text (fragile across that many formats), `matching.format_location()`
+builds a consistent `"M74(S) J9"` style summary from the already-
+extracted structured fields every row has anyway (`resolve_road_name()`,
+the leg's own canonical `data_direction`, `extract_junctions()`) — reused
+directly, not re-parsed. A closure spanning two junctions shows as
+`"M74(S) J8-J9"`; one whose junction only came from the comment fallback
+(e.g. a diversion instruction like "leave the motorway at J22") gets a
+`"(near)"` qualifier, since that's an inferred proxy for the closure's
+location, not a stated fact about where it is.
+
+Using the *leg's own* `data_direction` rather than each closure's own
+direction field is deliberate: every closure reaching this point has
+already been confirmed to match that leg's direction (including the
+"Both directions" wildcard case), so the leg's own canonical value is
+both simpler and more reliable than re-parsing whatever format each
+source happened to use for its own direction field.
+
+**Slip-road terminology is detected and normalized too**, via
+`matching.detect_slip_road()` — real variants seen across sources:
+"Offslip" (no separator), "slip off" (reversed order), "Slip Off"
+(capitalized), plausible "Onslip"/"on-slip"/"slip on" equivalents, and
+bare "slip road" with no on/off specified. All normalize to "Entry Slip
+Road", "Exit Slip Road", or "Slip road" and append as a qualifier, e.g.
+`"M74(S) J9 (Exit Slip Road)"`. This was added as a deliberate second
+pass: the first version of the normalized location dropped slip-road
+information entirely, which is a real, meaningful distinction (a
+slip-road closure behaves very differently from a mainline one), not
+just descriptive noise safe to strip out. Qualifiers combine into one
+parenthetical when more than one applies, e.g. `"M74(S) J22 (Exit Slip
+Road, near)"`, rather than stacking separate parenthetical groups.
+
+**Nothing is discarded** — each source's original, more descriptive text
+(place names, closure type, lane specifics) moves into the comment/More
+Info section instead of the primary label, rather than being dropped.
+Confirmed directly: a real M6 entry's normalized location is `"M6(S)
+J40"`, while its More Info panel still shows the full original text,
+"M6 southbound within J40 — M6 Southbound Jct 40 to 39 Lane 3 closure
+with Narrow lanes (Mp 459/4 - 455/7)".
+
 ## More Info column
 
 Diversion text (Traffic Scotland: `"Diversion: <text>"`, added by
