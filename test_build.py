@@ -13,6 +13,7 @@ building each source) rather than synthetic data, noted per test.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 import urllib.error
@@ -20,6 +21,7 @@ import urllib.error
 import matching
 import build
 from sources import national_highways as nh
+from sources import national_highways_traffic_search as nhts
 from sources import scotland_incidents as si
 from sources import traffic_scotland as scot
 from sources import travel_alerts as ta
@@ -1217,6 +1219,119 @@ check(
 
 _si_rows = matching.rows_for_leg(_si_m74_results, "M74", "Northbound", 1, 10)
 check("correctly matches an M74 J1-10 style leg (2 real northbound M74 entries)", len(_si_rows) == 2)
+
+
+# =======================================================================
+# sources/national_highways_traffic_search.py
+# =======================================================================
+
+section("national_highways_traffic_search: normalize_record (real production JSON)")
+
+_nhts_real_json = json.loads('''
+{"data":[
+  {"id":"8e040511-58f5-4bac-b7af-91deb9adf3f4","road":"M6","region":"West Midlands",
+   "title":"M6 northbound within J9","location":"The M6 northbound between junctions J9 and J11",
+   "reason":"Congestion","returnToNormal":"2026-08-16T17:26:51","timeToClear":null,
+   "status":"active","delay":662,"direction":"N","type":"AbnormalTraffic","laneClosures":null,
+   "period":"[]","lanesClosed":"0|0|0","carriageway":"A","situationId":3442162,
+   "createdDate":"2026-08-16T16:17:46.683","updatedDate":"2026-08-16T16:50:49.55","version":28,
+   "isActive":true,"lanesClosedText":"","returnToNormalText":"Normal traffic conditions are expected between 17:30 and 17:45 on 16 August 2026",
+   "timeToClearText":"","delayText":"There are currently delays of 12 minutes against expected traffic",
+   "laneClosuresText":"","periodText":""},
+  {"id":"63f72c85-5cba-485b-9b41-ec5289cd4a6b","road":"M6","region":"West Midlands",
+   "title":"M6 southbound between J16 and J15","location":"The M6 southbound between junctions J16 and J15",
+   "reason":"Congestion","returnToNormal":null,"timeToClear":null,"status":"active","delay":2835,
+   "direction":"S","type":"AbnormalTraffic","laneClosures":null,"period":"[]","lanesClosed":"0|0|0",
+   "carriageway":"B","situationId":3448440,"createdDate":"2026-08-17T03:17:38.9",
+   "updatedDate":"2026-08-17T04:59:39.127","version":118,"isActive":true,"lanesClosedText":"",
+   "returnToNormalText":"","timeToClearText":"",
+   "delayText":"There are currently delays of 48 minutes against expected traffic",
+   "laneClosuresText":"","periodText":""}
+],"pagination":{"totalItems":2,"currentPage":1,"pageSize":10,"totalPages":1}}
+''')
+
+_original_nhts_fetch_page = nhts.fetch_page
+nhts.fetch_page = lambda road_name, page, page_size: _nhts_real_json
+try:
+    _nhts_results = nhts.fetch_from_national_highways_traffic_search("M6")
+finally:
+    nhts.fetch_page = _original_nhts_fetch_page
+
+check("both real records parsed", len(_nhts_results) == 2)
+
+_nhts_r1 = _nhts_results[0]
+check("direction code N mapped to northBound", _nhts_r1["direction"] == "northBound")
+check("start_datetime has sub-second precision stripped", _nhts_r1["start_datetime"] == "2026-08-16T16:17:46")
+check("end_datetime correctly uses returnToNormal when present", _nhts_r1["end_datetime"] == "2026-08-16T17:26:51")
+check("cause_type is the reason field", _nhts_r1["cause_type"] == "Congestion")
+check("comment is the delayText field", "delays of 12 minutes" in _nhts_r1["comment"])
+check("record_id uses the real UUID", _nhts_r1["record_id"] == "nh-traffic-8e040511-58f5-4bac-b7af-91deb9adf3f4")
+check(
+    "source_label honestly flags this as the unofficial beta endpoint",
+    _nhts_r1["source_label"] == "National Highways Traffic Search (beta)",
+)
+
+_nhts_r2 = _nhts_results[1]
+check("direction code S mapped to southBound", _nhts_r2["direction"] == "southBound")
+check(
+    "end_datetime is empty (honest, not guessed) when both returnToNormal and timeToClear are null",
+    _nhts_r2["end_datetime"] == "",
+)
+
+check(
+    "junction extraction works via the SHARED matching.py logic with zero custom parsing needed",
+    matching._junctions_in_text(_nhts_r1["location_description"]) == [9, 11]
+    and matching._junctions_in_text(_nhts_r2["location_description"]) == [16, 15],
+)
+
+_nhts_rows = matching.rows_for_leg(_nhts_results, "M6", "northBound", 8, 12)
+check("correctly matches an M6 J8-12 northbound leg", len(_nhts_rows) == 1)
+
+section("national_highways_traffic_search: pagination follows through all pages")
+
+_nhts_page1 = {"data": [{"id": "a", "road": "M6", "direction": "N", "location": "M6 J1"}],
+               "pagination": {"totalItems": 3, "currentPage": 1, "pageSize": 1, "totalPages": 3}}
+_nhts_page2 = {"data": [{"id": "b", "road": "M6", "direction": "S", "location": "M6 J2"}],
+               "pagination": {"totalItems": 3, "currentPage": 2, "pageSize": 1, "totalPages": 3}}
+_nhts_page3 = {"data": [{"id": "c", "road": "M6", "direction": "N", "location": "M6 J3"}],
+               "pagination": {"totalItems": 3, "currentPage": 3, "pageSize": 1, "totalPages": 3}}
+_nhts_pages_by_num = {1: _nhts_page1, 2: _nhts_page2, 3: _nhts_page3}
+_nhts_calls = []
+
+
+def _fake_nhts_paginated(road_name, page, page_size):
+    _nhts_calls.append(page)
+    return _nhts_pages_by_num[page]
+
+
+nhts.fetch_page = _fake_nhts_paginated
+try:
+    _nhts_paged_results = nhts.fetch_from_national_highways_traffic_search("M6", page_size=1)
+finally:
+    nhts.fetch_page = _original_nhts_fetch_page
+
+check("followed all 3 pages in order", _nhts_calls == [1, 2, 3])
+check("all 3 records merged across pages", len(_nhts_paged_results) == 3)
+
+section("national_highways_traffic_search: defensive road-filter")
+
+_nhts_mixed_payload = {
+    "data": [
+        {"id": "x", "road": "M6", "direction": "N", "location": "M6 J1"},
+        {"id": "y", "road": "M62", "direction": "N", "location": "M62 J1"},  # wrong road
+    ],
+    "pagination": {"totalItems": 2, "currentPage": 1, "pageSize": 10, "totalPages": 1},
+}
+nhts.fetch_page = lambda road_name, page, page_size: _nhts_mixed_payload
+try:
+    _nhts_filtered = nhts.fetch_from_national_highways_traffic_search("M6")
+finally:
+    nhts.fetch_page = _original_nhts_fetch_page
+
+check(
+    "a mismatched road is excluded even if the (already server-filtered) API somehow returned one",
+    len(_nhts_filtered) == 1 and _nhts_filtered[0]["road_name"] == "M6",
+)
 
 
 # =======================================================================

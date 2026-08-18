@@ -37,6 +37,7 @@ build.py                        orchestration: load config, call sources, render
 matching.py                     shared route/leg matching (junction extraction, sorting, filtering)
 sources/
   national_highways.py          live API + flat JSON mirror
+  national_highways_traffic_search.py  live traffic search (unofficial beta)
   xlsx_advance_notice.py        National Highways advance-notice spreadsheet
   traffic_scotland.py           Traffic Scotland scraper (M74)
   travel_alerts.py               National Highways Travel Alerts scraper (major incidents)
@@ -196,6 +197,50 @@ today" is misleading. This only ever affects "Today" in practice, since
 every other day option is entirely in the future by construction and
 can't already have ended. **All** is unaffected — it's the explicit
 "show me everything" view, past included, and never applies this check.
+
+## Additional source: National Highways live traffic search (unofficial, beta)
+
+An internal endpoint (`/trafficsearchapi/events?road=<ROAD>`) found by
+inspecting network requests on National Highways' new, still-in-beta
+"Check current incidents, disruptions and delays" page — that page
+shows placeholder/Lorem-Ipsum content on initial load and only fetches
+real data once you search, so the underlying API call had to be found
+via the browser's network inspector rather than by reading the page's
+static HTML. **Not auto-enabled** — add a `type:
+"national_highways_traffic_search"` entry under `additional_sources` per
+English road (commented-out example already in `routes.yaml`).
+
+**Unofficial and undocumented, unlike everything else this project
+talks to.** This isn't a published, versioned product on National
+Highways' developer portal — it's an internal endpoint powering one
+specific page's search box, found by inspecting network traffic while
+testing that page. Treat it as more fragile than every other source in
+this project: it could change shape or be withdrawn without notice at
+any time.
+
+**Fills a genuinely different gap.** This is real-time traffic-*flow*
+data (`"reason": "Congestion"`, `"type": "AbnormalTraffic"`) — distinct
+from scheduled roadworks (the main API / XLSX report) and from Travel
+Alerts' hand-curated, highest-severity-only incidents. A situation here
+can have a real machine-readable end time (`returnToNormal`) when known
+— most other incident-style sources in this project have no end time at
+all.
+
+**Clean JSON in, almost no custom parsing needed.** Unlike every scraped
+source in this project, this is real structured JSON with a clean
+`location` field (e.g. "The M6 northbound between junctions J9 and
+J11") that the *existing* shared junction-extraction logic in
+`matching.py` already parses correctly with zero new code — verified
+directly against real production data. The API is also already
+filtered server-side by the `road=` query parameter, so (unlike every
+Scotland/Travel-Alerts source) no cross-road junction-contamination
+guard was needed here — though a cheap defensive road check is still
+applied in case that ever changes.
+
+**England only** (M6/M57/M58/M62 in this project's own route config) —
+Scotland's equivalent live-incidents source is
+`sources/scotland_incidents.py`, a completely separate module for a
+completely separate country's road network.
 
 ## Additional source: Traffic Scotland incidents
 

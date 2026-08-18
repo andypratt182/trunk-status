@@ -101,6 +101,22 @@ site:
     # limitation this implies (possible overlap with the roadworks
     # scraper for the same physical closure, not yet resolved).
 
+    # National Highways live traffic search (unofficial, beta) -- an
+    # internal endpoint found by inspecting network requests on National
+    # Highways' new (still-in-beta) "Check current incidents,
+    # disruptions and delays" page, since that page shows placeholder
+    # content until you actually search. NOT auto-enabled -- add one
+    # entry per English road, e.g.:
+    #   - type: "national_highways_traffic_search"
+    #     road_name: "M6"
+    # UNOFFICIAL AND UNDOCUMENTED -- unlike the versioned Road & Lane
+    # Closures API v2, this could change shape or be withdrawn without
+    # notice at any time. Fills a genuinely different gap though: real-
+    # time traffic-flow data (congestion, abnormal traffic), distinct
+    # from scheduled roadworks and from Travel Alerts' highest-severity-
+    # only incidents -- see sources/national_highways_traffic_search.py's
+    # module docstring for how this was found and what it covers.
+
 routes:
   - id: axis
     name: "Axis"
