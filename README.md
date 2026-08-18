@@ -138,6 +138,33 @@ as `<td ...></td>` with literally zero characters between the tags when
 there's no comment — confirmed with a test that checks the raw rendered
 HTML, not just that the visible page looks right.
 
+## M61/M6 merge exclusion (narrow, road-specific)
+
+National Highways describes an M61-origin closure reaching the M61/M6
+merge point (a real, well-known interchange near Preston — the M61
+terminates into the M6 northbound at J30) with a `location_description`
+like "M6 northbound between J30 and J31" — even though the closure is
+fundamentally on the M61, not the M6 mainline. The `comment` field
+reveals the real picture: "M61 Northbound Jct 9 to M6 Jct 30 carriageway
+closure." `matching.is_m61_m6_merge_closure()` detects this specific
+"M61 ... to M6" phrasing and excludes it from the M6 northbound leg.
+
+Deliberately scoped **narrow** — `road_name == "M6"` and northbound
+only, matching the exact real reported case — rather than a general
+"any cross-road mention" rule. A broad rule risks hiding genuinely
+relevant M6 closures that just happen to mention another road as part
+of a diversion route, the same false-positive class already fixed twice
+elsewhere in this project (Traffic Scotland's M8/M74 junction
+contamination, Travel Alerts' A31/M27 boundary reference). Kept as a
+separate function rather than folded into `closure_matches_leg()`
+itself, so it's easy to find, adjust, or remove later without touching
+the general-purpose matcher every other road relies on. Confirmed with
+tests that an M6 closure merely *mentioning* the M61 (e.g. as an
+alternative diversion route) is correctly left alone — only the
+specific merge-point phrasing triggers the exclusion — and that the
+same phrasing on a different road entirely (M57) has no effect, since
+the rule is scoped to M6 by name, not by general text matching.
+
 ## Row icons
 
 Each closure/incident row shows a small icon (`static/logos/*.png`),

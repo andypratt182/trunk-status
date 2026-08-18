@@ -124,6 +124,35 @@ def closure_matches_leg(closure: dict, road_name: str, data_direction: str,
     return any(lo <= j <= hi for j in junctions)
 
 
+# The M61 terminates into the M6 northbound at J30 (a real, well-known
+# interchange, not a general cross-road ambiguity). National Highways'
+# own data describes an M61-origin closure reaching this merge point as
+# e.g. "M61 Northbound Jct 9 to M6 Jct 30 carriageway closure." in the
+# comment, while the API's own location_description field then
+# approximates this as an M6 "J30-J31" range -- even though the closure
+# is fundamentally on the M61, not the M6 mainline. Deliberately scoped
+# narrow (M61->M6 specifically, northbound only, matching the exact real
+# reported case) rather than a general "any cross-road mention" rule --
+# a broad rule risks hiding genuinely relevant M6 closures that just
+# happen to mention another road as part of a diversion route, the same
+# false-positive class already fixed twice elsewhere in this project
+# (Traffic Scotland's M8/M74, Travel Alerts' A31/M27). Kept as a
+# separate, clearly-named exclusion rather than baked into
+# closure_matches_leg() itself, so it's easy to find, adjust, or remove
+# later without touching the general-purpose matcher every road relies on.
+_M61_MERGE_RE = re.compile(r'\bM61\b.*?\bto\b.*?\bM6\b', re.IGNORECASE | re.DOTALL)
+
+
+def is_m61_m6_merge_closure(closure: dict, road_name: str, data_direction: str) -> bool:
+    """True if this is actually an M61-origin closure reaching the
+    M61/M6 merge point, not a genuine M6 mainline closure -- see the
+    comment above _M61_MERGE_RE for why this needs its own narrow rule."""
+    if road_name.upper() != "M6" or "north" not in (data_direction or "").lower():
+        return False
+    haystack = f"{closure.get('location_description', '')} {closure.get('comment', '')}"
+    return bool(_M61_MERGE_RE.search(haystack))
+
+
 def format_dt(iso_str: str) -> str:
     if not iso_str:
         return ""
@@ -317,6 +346,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
     matches = [
         c for c in closures
         if closure_matches_leg(c, road_name, data_direction, j_from, j_to)
+        and not is_m61_m6_merge_closure(c, road_name, data_direction)
     ]
 
     # A single closure can have multiple matching location segments (e.g.

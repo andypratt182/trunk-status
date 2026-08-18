@@ -299,6 +299,52 @@ check(
     len(matching.rows_for_leg([_real_gretna_services_closure], "M74", "southBound", 1, 5)) == 0,
 )
 
+section("matching: is_m61_m6_merge_closure (real reported bug -- M61/M6 merge shown as an M6 mainline closure)")
+
+_m61_merge_closure = {
+    "road_name": "M6", "direction": "northBound",
+    "location_description": "M6 northbound between J30 and J31",
+    "comment": "M61 Northbound Jct 9 to M6 Jct 30 carriageway closure.",
+    "cause_type": "roadMaintenance", "lanes_restricted": 5, "lanes_operational": 0,
+    "start_datetime": "2026-08-26T20:00:00", "end_datetime": "2026-08-27T05:00:00",
+    "validity_status": "planned", "source_label": "Live API",
+}
+check(
+    "correctly detected as an M61-origin closure reaching the M6, not a genuine M6 closure",
+    matching.is_m61_m6_merge_closure(_m61_merge_closure, "M6", "northBound"),
+)
+check(
+    "correctly excluded from the M6 Northbound leg end-to-end",
+    len(matching.rows_for_leg([_m61_merge_closure], "M6", "northBound", 26, 45)) == 0,
+)
+
+_ordinary_m6_closure = {
+    "road_name": "M6", "direction": "northBound",
+    "location_description": "M6 northbound between J40 and J39", "comment": "",
+    "cause_type": "roadMaintenance", "lanes_restricted": 1, "lanes_operational": 2,
+    "start_datetime": "2026-08-26T20:00:00", "end_datetime": "2026-08-27T05:00:00",
+    "validity_status": "planned", "source_label": "Live API",
+}
+check(
+    "a genuine M6 northbound closure (no M61 mention at all) is completely unaffected",
+    len(matching.rows_for_leg([_ordinary_m6_closure], "M6", "northBound", 26, 45)) == 1,
+)
+
+_m61_mentioned_as_diversion = dict(_ordinary_m6_closure,
+                                    comment="Diversion via M61 available if required")
+check(
+    "an M6 closure that merely MENTIONS the M61 (e.g. as an alternative diversion "
+    "route) is NOT excluded -- only the specific 'M61 ... to M6' merge pattern is",
+    len(matching.rows_for_leg([_m61_mentioned_as_diversion], "M6", "northBound", 26, 45)) == 1,
+)
+
+_m61_pattern_on_different_road = dict(_m61_merge_closure, road_name="M57", location_description="M57 J4 to J5")
+check(
+    "the exact same merge-pattern text on a DIFFERENT road (M57) is NOT excluded -- "
+    "this rule is deliberately scoped to road_name == 'M6' only, not general text matching",
+    len(matching.rows_for_leg([_m61_pattern_on_different_road], "M57", "northBound", 4, 6)) == 1,
+)
+
 section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
 
 gretna_style = {
