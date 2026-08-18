@@ -409,6 +409,13 @@ footer.site-footer {
     transform: rotate(90deg);
     margin: 2px 0;
   }
+  /* Keep each leg's road badge and its junctions on one line (e.g.
+     "M74  J8 --- J22"), rather than stacking the badge above the
+     junction pair -- more compact and easier to scan as a single row. */
+  .journey-leg {
+    flex-direction: row;
+    gap: 10px;
+  }
 
   /* Closures table -> one bordered card per closure, each field labeled
      above its value, no horizontal scrolling. Same underlying <tr>/<td>
