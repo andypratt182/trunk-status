@@ -424,27 +424,30 @@ footer.site-footer {
     font-weight: 600;
     max-width: none;
   }
-  /* Icon sits pinned to the top-right corner of the card, flush with
-     the card's own padding, rather than inline in the normal flow of
-     fields -- so it stays fixed there regardless of how much Status/
-     Location/etc. text wraps to. Requires the <tr> itself to be the
-     positioning anchor (position: relative), since the card's border/
-     padding/rounded corners all live on the <tr>, not a wrapping div.
-     Suppressing its own ::before label -- a floating corner icon reads
+  /* Icon sits at the top-right of the card, with the rest of the card's
+     content (Location's heading and wrapped text especially) flowing
+     around it -- rather than absolute positioning, which takes the icon
+     out of the document flow entirely, so nothing else "knows" to leave
+     room for it. Confirmed as a real problem at this icon's actual size
+     (160x90 -- much taller than the 34x34 this was first built at): with
+     absolute positioning, the icon visibly covered the Location heading
+     underneath it. float: right avoids that at any icon size, since the
+     browser automatically wraps subsequent block content around a float
+     rather than needing hand-tuned pixel offsets that would need
+     re-tuning any time the icon's size changes.
+     Suppressing its own ::before label -- a floated icon like this reads
      as decoration, not a labelled field like the others. */
-  table.closures tr { position: relative; }
   table.closures td.icon-cell {
-    position: absolute;
-    top: 14px;
-    right: 16px;
+    float: right;
     display: block;
     width: auto;
-    margin: 0;
+    margin: 0 0 8px 12px;
     padding: 0;
   }
   table.closures td.icon-cell .row-icon {
-    width: 34px;
-    height: 34px;
+    display: block;
+    width: 80px;
+    height: 45px;
   }
   table.closures td.icon-cell::before { content: none; }
   /* table.closures tr { display: block; } above has higher specificity
