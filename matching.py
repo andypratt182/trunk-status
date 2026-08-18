@@ -175,7 +175,9 @@ _ACCIDENT_KEYWORDS = (
     "road traffic incident",
 )
 _FULL_CLOSURE_KEYWORDS = ("total closure", "road closure", "carriageway closure", "full closure")
-_LANE_CLOSURE_KEYWORDS = ("lane closure", "lanes restricted")
+_LANE_CLOSURE_KEYWORDS = (
+    "lane closure", "lanes restricted", "single lane running", "single-lane running",
+)
 
 
 def choose_icon(row: dict) -> str:

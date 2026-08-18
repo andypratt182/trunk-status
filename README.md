@@ -150,10 +150,12 @@ lane text — checked in priority order, most specific/actionable first:
    (e.g. "M74 J9 Offslip SB")
 3. `road_closed.png` — a full/total/carriageway closure, or
    `lanes_operational == 0`
-4. `lane_closure.png` — a real lane-restriction number or "lane closure"
-   text, even when the underlying cause is ordinary roadworks (this is
-   deliberately impact-based: a roadworks entry that closes one lane
-   gets the lane-closure icon, not the generic roadworks one)
+4. `lane_closure.png` — a real lane-restriction number, "lane closure"
+   text, or "single lane running" text (in either `lane_info` or the
+   description/comment), even when the underlying cause is ordinary
+   roadworks (this is deliberately impact-based: a roadworks entry that
+   closes one lane gets the lane-closure icon, not the generic
+   roadworks one)
 5. `roadworks.png` — fallback when nothing more specific matched; the
    most common case in practice
 

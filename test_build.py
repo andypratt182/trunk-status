@@ -156,6 +156,21 @@ check(
     }) == matching.ICON_LANE_CLOSURE,
 )
 check(
+    "'single lane running' text (in lane_info) correctly gets the lane closure icon",
+    matching.choose_icon({
+        "cause": "Road maintenance", "location": "M6(S) J40", "comment": "",
+        "lane_info": "Single lane running", "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_LANE_CLOSURE,
+)
+check(
+    "'single lane running' text appearing in the comment/description instead is also caught",
+    matching.choose_icon({
+        "cause": "Road maintenance", "location": "M6(S) J15-J16",
+        "comment": "M6 Southbound Jct 16 to 15 - single lane running in operation for resurfacing works",
+        "lane_info": "", "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_LANE_CLOSURE,
+)
+check(
     "generic roadworks with no lane/slip/accident detail at all -> roadworks fallback",
     matching.choose_icon({
         "cause": "Road maintenance", "location": "M57 J4 to J6", "comment": "",
