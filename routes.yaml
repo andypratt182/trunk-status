@@ -117,6 +117,39 @@ site:
     # only incidents -- see sources/national_highways_traffic_search.py's
     # module docstring for how this was found and what it covers.
 
+    # --- Incident sources (enabled) ---------------------------------
+    # Travel Alerts (major incidents: crashes, fires, serious
+    # collisions). The listing page is national and fetched ONCE per
+    # build regardless of how many roads are listed here (see
+    # sources/travel_alerts.py's _page_cache) -- so adding roads costs
+    # no extra HTTP requests.
+    - type: "travel_alerts_scraper"
+      road_name: "M6"
+    - type: "travel_alerts_scraper"
+      road_name: "M57"
+    - type: "travel_alerts_scraper"
+      road_name: "M58"
+    - type: "travel_alerts_scraper"
+      road_name: "M62"
+
+    # Traffic Scotland live incidents (queues, breakdowns, closures).
+    # Also fetched once per build, same caching as above.
+    - type: "scotland_incidents_scraper"
+      road_name: "M74"
+
+    # National Highways live traffic search (unofficial beta endpoint --
+    # congestion / abnormal traffic). Unlike the two above, this one IS
+    # a real per-road API query, so each road here is a separate HTTP
+    # request.
+    - type: "national_highways_traffic_search"
+      road_name: "M6"
+    - type: "national_highways_traffic_search"
+      road_name: "M57"
+    - type: "national_highways_traffic_search"
+      road_name: "M58"
+    - type: "national_highways_traffic_search"
+      road_name: "M62"
+
 routes:
   - id: axis
     name: "Axis"
