@@ -236,8 +236,36 @@ def detect_slip_road(text: str) -> str:
     return ""
 
 
+# "Gretna Services", "Todhills Services", etc. -- named motorway service
+# stations don't have their own junction number, they sit BETWEEN two
+# junctions. Real bug this guards against: "M74 SB Gretna Services
+# Offslip - Slip Road Closure" with a diversion routing traffic via
+# "J21 SB Offslip" (since Gretna's own slip road is closed) was showing
+# as "M74(S) J21 (near)" -- implying the closure IS at/near J21, when
+# it's actually at Gretna Services, which sits between J21 and J22. The
+# diversion's junction is a real, useful routing detail, but it's an
+# inferred proxy for location, not a stated fact the way the service
+# station's own name is.
+# Requires each word to be proper Title Case (capital + lowercase, e.g.
+# "Gretna") rather than any capitalized word -- otherwise this matches
+# direction codes too, since "SB"/"NB" also start with a capital letter.
+# Confirmed as a real problem while building this: "M74 SB Gretna
+# Services" was extracting "SB Gretna Services" instead of just "Gretna
+# Services" until this was tightened.
+_SERVICES_RE = re.compile(r"\b((?:[A-Z][a-z][A-Za-z'-]*\s+)*[A-Z][a-z][A-Za-z'-]*\s+Services)\b")
+
+
+def extract_services_name(text: str) -> str:
+    """Extract a named motorway service station from location text, if
+    present -- see the module comment on _SERVICES_RE for why this is
+    preferred over a fallback-derived junction number when both are
+    available."""
+    m = _SERVICES_RE.search(text)
+    return m.group(1) if m else ""
+
+
 def format_location(road_name: str, direction_letter: str, junctions: list[int],
-                     qualifiers: list[str] | None = None) -> str:
+                     qualifiers: list[str] | None = None, place_name: str = "") -> str:
     """Build a consistent 'M74(S) J9' style location summary from
     already-extracted structured fields, rather than displaying each
     source's own free-text location description verbatim -- which
@@ -253,9 +281,15 @@ def format_location(road_name: str, direction_letter: str, junctions: list[int],
     second pass after the first version of this function dropped it
     entirely; it's real, useful information (a slip-road closure behaves
     very differently from a mainline one), not just descriptive noise to
-    strip out."""
+    strip out. place_name (e.g. "Gretna Services"), when given, replaces
+    the junction number rather than sitting alongside it -- a named
+    service station doesn't have its own junction number (it sits
+    between two), so showing both would misleadingly imply the closure
+    is precisely at that junction."""
     parts = [f"{road_name}({direction_letter})" if direction_letter else road_name]
-    if junctions:
+    if place_name:
+        parts.append(place_name)
+    elif junctions:
         uniq = sorted(set(junctions))
         parts.append(f"J{uniq[0]}" if len(uniq) == 1 else f"J{uniq[0]}-J{uniq[-1]}")
     text = " ".join(parts)
@@ -301,6 +335,15 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         # south jct 8 on slip" was being misclassified as a slip-road
         # closure entirely because of that incidental mention.
         slip_road = detect_slip_road(raw_location)
+        # Prefer a named service station over a fallback-derived junction
+        # number, when both are available -- a diversion routing traffic
+        # via a nearby junction (since the service station's own slip
+        # road is closed) is a real, useful routing detail, but it's an
+        # inferred proxy for location, not a stated fact the way the
+        # station's own name is. Scoped to the fallback case specifically
+        # -- a junction stated directly in the location text is reliable
+        # and shouldn't be overridden by this.
+        services_name = extract_services_name(raw_location) if used_fallback else ""
 
         if resolved_road:
             qualifiers = []
@@ -310,9 +353,12 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             # inferred proxy for the closure's location (e.g. a diversion
             # instruction like "leave the motorway at J22"), not a stated
             # fact about where the closure itself actually is.
-            if used_fallback:
+            if used_fallback and not services_name:
                 qualifiers.append("near")
-            location_text = format_location(resolved_road, direction_display, all_junctions, qualifiers)
+            junctions_to_show = [] if services_name else all_junctions
+            location_text = format_location(
+                resolved_road, direction_display, junctions_to_show, qualifiers, services_name,
+            )
         else:
             # Nothing structured enough to build a clean summary from --
             # fall back to whatever raw text is available rather than

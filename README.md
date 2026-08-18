@@ -69,6 +69,38 @@ just descriptive noise safe to strip out. Qualifiers combine into one
 parenthetical when more than one applies, e.g. `"M74(S) J22 (Exit Slip
 Road, near)"`, rather than stacking separate parenthetical groups.
 
+**Deliberately scans ONLY the raw location text, never the comment/
+diversion text, for slip-road detection.** A real bug caught in
+production: a genuine mainline closure ("M74 SB Jct 7 to Jct 8 - Road
+closure") was misclassified as a slip-road closure, because its
+diversion instructions incidentally said "...rejoin M74 south jct 8 on
+slip" — describing how traffic gets back onto the motorway at the end of
+the diversion, nothing to do with what the closure itself is. `choose_icon()`
+was affected the same way (it independently re-scanned the same
+diversion text with its own keyword list) and has been changed to check
+the already-normalized location qualifier instead, which also guarantees
+the icon and the visible location text can never disagree with each
+other.
+
+**Named service stations (e.g. "Gretna Services") are preferred over a
+fallback-derived junction number**, via `matching.extract_services_name()`.
+A service station doesn't have its own junction number — it sits
+*between* two — so a fallback junction pulled from a diversion (e.g.
+"J21 SB Offslip", routing traffic to use J21's own slip road since the
+service station's own is closed) was showing as `"M74(S) J21 (near)"`,
+implying the closure is at/near J21 specifically. Gretna Services
+actually sits between J21 and J22; the diversion's junction is a real,
+useful routing detail, but it's an inferred proxy for location, not a
+stated fact the way the station's own name is. Scoped specifically to
+the fallback case — a junction stated directly in the location text is
+reliable and isn't overridden by this. The junction is still used
+correctly for leg *matching* internally either way; only the *displayed*
+text changes. The place-name regex requires proper Title Case (capital +
+lowercase, e.g. "Gretna") rather than any capitalized word — a real bug
+caught while building this: it first matched "SB Gretna Services"
+instead of just "Gretna Services", since direction codes like "SB" also
+start with a capital letter.
+
 **Nothing is discarded** — each source's original, more descriptive text
 (place names, closure type, lane specifics) moves into the comment/More
 Info section instead of the primary label, rather than being dropped.

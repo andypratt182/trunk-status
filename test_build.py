@@ -240,6 +240,41 @@ check(
     _real_rows[0]["icon"] == matching.ICON_ROAD_CLOSED,
 )
 
+section("matching: extract_services_name (real reported bug -- Gretna Services falsely shown as J21)")
+
+check(
+    "'SB'/'NB' direction codes are NOT mistaken for part of the place name "
+    "(a real bug caught while building this: the regex first matched "
+    "'SB Gretna Services' before being tightened to require proper Title Case)",
+    matching.extract_services_name("M74 SB Gretna Services Offslip - Slip Road Closure") == "Gretna Services",
+)
+check(
+    "no services station mentioned -> empty string",
+    matching.extract_services_name("M74 SB Jct 7 to Jct 8 - Road closure") == "",
+)
+
+_real_gretna_services_closure = {
+    "road_name": "M74", "direction": "Southbound",
+    "location_description": "M74 SB Gretna Services Offslip - Slip Road Closure",
+    "comment": "Diversion: J21 SB Offslip, B6357, B7076",
+    "cause_type": "Lining Works", "lane_info": "Road Closure.",
+    "lanes_restricted": None, "lanes_operational": None, "source_label": "Traffic Scotland (scraped)",
+    "start_datetime": "2026-08-24T20:00:00", "end_datetime": "2026-08-25T06:00:00",
+    "validity_status": "planned",
+}
+_gretna_rows = matching.rows_for_leg([_real_gretna_services_closure], "M74", "southBound", 8, 22)
+check("one row produced", len(_gretna_rows) == 1)
+check(
+    "shows the real place name, not a misleading fallback junction -- Gretna Services "
+    "sits BETWEEN J21 and J22, it isn't AT J21 the way the diversion text alone implies",
+    _gretna_rows[0]["location"] == "M74(S) Gretna Services (Exit Slip Road)",
+)
+check(
+    "the fallback-derived junction (J21) is still used correctly for leg MATCHING "
+    "internally -- only the DISPLAYED text changes, not which leg this belongs to",
+    len(matching.rows_for_leg([_real_gretna_services_closure], "M74", "southBound", 1, 5)) == 0,
+)
+
 section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
 
 gretna_style = {
