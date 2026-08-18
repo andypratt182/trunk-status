@@ -45,6 +45,7 @@
           <th>Cause</th>
           <th>Start</th>
           <th>End</th>
+          <th>More Info</th>
           <th>Source</th>
         </tr>
       </thead>
@@ -55,9 +56,6 @@
           <td class="icon-cell" data-label="Type"><img class="row-icon" src="static/logos/{{ row.icon }}" alt="" width="20" height="20"></td>
           <td class="location-cell" data-label="Location">
             {{ row.location }}
-            {% if row.comment and row.comment != row.location %}
-              <span class="comment">{{ row.comment }}</span>
-            {% endif %}
           </td>
           <td class="lanes-cell" data-label="Lanes">
             {% if row.lane_info %}
@@ -72,6 +70,12 @@
           <td data-label="Cause">{{ row.cause }}</td>
           <td data-label="Start">{{ row.start }}</td>
           <td data-label="End">{{ row.end }}</td>
+          <td class="more-info-cell" data-label="More Info">{% if row.comment and row.comment != row.location -%}
+            <details>
+              <summary>More Information</summary>
+              <p>{{ row.comment }}</p>
+            </details>
+          {%- endif %}</td>
           <td class="source-cell" data-label="Source">{{ row.source_label }}</td>
         </tr>
         {% endfor %}
