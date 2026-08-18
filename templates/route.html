@@ -6,23 +6,18 @@
   <h1>{{ route_name }} <span class="direction-label">— {{ direction_label }}</span></h1>
 </div>
 
-<div class="journey-strip" aria-hidden="true">
+<ul class="journey-list" aria-hidden="true">
   {% for leg in leg_groups %}
-  <div class="journey-leg">
+  <li>
     <span class="badge {{ leg.badge_class }}">{{ leg.road_name }}</span>
     {% if leg.junction_from is not none %}
-      <div class="junction-strip">
-        <div class="journey-node {{ leg.badge_class }}">J{{ leg.junction_from }}</div>
-        <div class="junction-line"></div>
-        <div class="journey-node {{ leg.badge_class }}">J{{ leg.junction_to }}</div>
-      </div>
+      <span class="journey-junc">J{{ leg.junction_from }}</span><span class="journey-arrow-inline">→</span><span class="journey-junc">J{{ leg.junction_to }}</span>
     {% else %}
-      <div class="journey-node-full {{ leg.badge_class }}">Entire road</div>
+      <span class="journey-full {{ leg.badge_class }}">Entire road</span>
     {% endif %}
-  </div>
-  {% if not loop.last %}<div class="journey-arrow">→</div>{% endif %}
+  </li>
   {% endfor %}
-</div>
+</ul>
 
 <p class="filter-hint" data-day-filter-hint hidden>Showing disruptions for <strong data-day-filter-hint-label></strong> — change this on the <a href="index.html">all routes</a> page.</p>
 
