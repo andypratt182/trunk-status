@@ -11,9 +11,9 @@
       <li class="direction-row">
         <div>
           <a href="{{ d.page }}">{{ d.label }}</a>
-          <div class="leg-chain-mini">
-            {% for leg in d.leg_summary %}<span class="mini-leg">{% if not loop.first %}<span class="mini-arrow">→ </span>{% endif %}<span class="badge {{ leg.badge_class }} badge-sm">{{ leg.road_name }}</span><span class="mini-junc">{% if leg.junction_from is not none %}J{{ leg.junction_from }}–J{{ leg.junction_to }}{% else %}full{% endif %}</span></span>{% endfor %}
-          </div>
+          <ul class="leg-chain-mini">
+            {% for leg in d.leg_summary %}<li><span class="badge {{ leg.badge_class }} badge-sm">{{ leg.road_name }}</span><span class="mini-junc">{% if leg.junction_from is not none %}J{{ leg.junction_from }}–J{{ leg.junction_to }}{% else %}full{% endif %}</span></li>{% endfor %}
+          </ul>
         </div>
         <span class="count-pill" data-count-for="{{ d.page_id }}">{{ d.count }} disruption{{ 's' if d.count != 1 else '' }}{% if d.active_count %}<span class="active-flag"> · {{ d.active_count }} active</span>{% endif %}</span>
       </li>
