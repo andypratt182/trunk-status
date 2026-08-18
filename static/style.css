@@ -123,12 +123,6 @@ button:focus-visible {
 .badge-motorway { background: var(--blue-motorway); }
 .badge-primary { background: var(--green-primary); }
 
-.junction-range {
-  color: var(--text-muted);
-  font-size: 0.82rem;
-  margin-bottom: 14px;
-}
-
 .direction-list { list-style: none; margin: 0; padding: 0; }
 .direction-row {
   display: flex;
@@ -350,6 +344,18 @@ table.closures tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 .location-cell { max-width: 320px; }
+.location-with-icon {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.row-icon {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  border-radius: 3px;
+}
 .location-cell .comment {
   display: block;
   color: var(--text-muted);
