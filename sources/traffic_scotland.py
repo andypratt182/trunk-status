@@ -218,7 +218,18 @@ def find_road_entries(html: str, aliases: set[str]) -> list[dict]:
     results = []
     seen_hrefs = set()
 
-    for link in soup.find_all("a", string=lambda s: s and "more details" in s.lower()):
+    # NOTE: deliberately not find_all("a", string=lambda...) -- .string
+    # silently returns None (matching nothing) for any tag with more than
+    # one child element. This currently works on the real page (its
+    # "More details" links happen to be simple single-text anchors), but
+    # a live run on National Highways' Travel Alerts page found this
+    # exact pattern silently matching zero links once that page's real
+    # "More details" link turned out to have nested markup -- get_text()
+    # is robust to both cases, so used here defensively even though this
+    # specific page hasn't shown the problem.
+    for link in soup.find_all("a", href=True):
+        if "more details" not in link.get_text(" ", strip=True).lower():
+            continue
         href = link.get("href", "")
         if not href or href in seen_hrefs:
             continue

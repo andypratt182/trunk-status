@@ -93,14 +93,30 @@ def parse_alert_cards(html: str) -> list[dict]:
     results = []
     seen_hrefs = set()
 
-    for link in soup.find_all("a", string=lambda s: s and "more details" in s.lower()):
+    # NOTE: this must NOT use find_all("a", string=lambda...) --
+    # BeautifulSoup's .string property (which that relies on) silently
+    # returns None whenever a tag has more than one child element, even
+    # simple ones, so it fails to find any "More details" link that has
+    # nested markup inside it (e.g. a heading + paragraph + a span for
+    # "More details", all inside one card-wide <a>). Confirmed as the
+    # real cause of a live run finding "0 total alerts" when the page
+    # genuinely had 4 -- get_text() correctly sees nested content, .string
+    # does not.
+    for link in soup.find_all("a", href=True):
+        if "more details" not in link.get_text(" ", strip=True).lower():
+            continue
         href = link.get("href", "")
         if not href or href in seen_hrefs:
             continue
 
         # Try the link's own text first, in case the whole card (title +
-        # subtitle + "More details") is one big clickable link.
-        own_text = link.get_text(" ", strip=True)
+        # subtitle + "More details") is one big clickable link. Uses "\n"
+        # as the separator (not a plain space) so that if the card's
+        # title/subtitle/"More details" are in separate child elements
+        # (e.g. <h2>/<p>/<span>), each stays on its own line for the
+        # split below -- joining with spaces would merge them into one
+        # unsplittable blob instead.
+        own_text = link.get_text("\n", strip=True)
         block_text = re.sub(r'\s*more details\s*$', '', own_text, flags=re.IGNORECASE).strip()
 
         if len(block_text) < 15:
