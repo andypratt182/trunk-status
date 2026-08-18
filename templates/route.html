@@ -39,6 +39,7 @@
       <thead>
         <tr>
           <th>Status</th>
+          <th class="icon-header">Type</th>
           <th>Location</th>
           <th>Lanes</th>
           <th>Cause</th>
@@ -51,16 +52,12 @@
         {% for row in leg.rows %}
         <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}" data-source="{{ row.source_label }}">
           <td data-label="Status"><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span></td>
+          <td class="icon-cell" data-label="Type"><img class="row-icon" src="static/logos/{{ row.icon }}" alt="" width="20" height="20"></td>
           <td class="location-cell" data-label="Location">
-            <div class="location-with-icon">
-              <img class="row-icon" src="static/logos/{{ row.icon }}" alt="" width="20" height="20">
-              <div>
-                {{ row.location }}
-                {% if row.comment and row.comment != row.location %}
-                  <span class="comment">{{ row.comment }}</span>
-                {% endif %}
-              </div>
-            </div>
+            {{ row.location }}
+            {% if row.comment and row.comment != row.location %}
+              <span class="comment">{{ row.comment }}</span>
+            {% endif %}
           </td>
           <td class="lanes-cell" data-label="Lanes">
             {% if row.lane_info %}
