@@ -396,8 +396,25 @@ window** instead of a single row spanning the misleading overall range.
 Periods either side of midnight (e.g. "22:00 to 23:59" then "00:00 to
 06:00" the next day) are merged into one continuous window, since
 that's how the site publishes an overnight closure — as two grid cells
-a minute apart, not one line. Closures with no such section fall back
-to a single row using the overall Starting/Ending, same as before.
+a minute apart, not one line.
+
+**Calendar-grid fallback, for when the Activity Periods list is empty
+but the schedule grid isn't.** A real entry ("M74 J9 Offslip SB - Total
+Closure") had a populated "Days & times affected" calendar — "Week
+commencing 17th Aug", "Early Morning (00:00-06:00)" checked on Monday —
+but a completely empty Activity Periods bulleted list underneath it. With
+only the bulleted-list parser to go on, that closure fell back all the
+way to its full Starting/Ending span (2nd Aug to 4th Sep — misleading,
+since it's really only active one Monday morning).
+`parse_calendar_grid_periods()` parses the calendar grid itself as a
+second fallback: "Week commencing X" gives the anchor Monday, each band
+(Early Morning / Evening) checked against a specific weekday gives the
+day offset and a coarse time range. This is less precise than a real
+Activity Periods line when one exists (a whole band, e.g. the full
+00:00-06:00 "Early Morning" window, rather than exact minutes) — so it's
+only ever used when the bulleted list is genuinely empty, never allowed
+to override it. Closures with neither section at all still fall back to
+a single row using the overall Starting/Ending, same as before.
 
 **The M74/A74(M) alias**: the same physical road is signed "A74(M)" on
 its southern stretch near the Scotland/England border, becoming "M74"

@@ -426,6 +426,92 @@ merged = scot.merge_adjacent_periods(raw)
 check("merges into one period across the midnight boundary", len(merged) == 1)
 check("merged span is Thu 22:00 -> Fri 06:00", merged[0] == ("2026-08-20T22:00:00", "2026-08-21T06:00:00"))
 
+section("traffic_scotland: parse_calendar_grid_periods (real M74 J9 Offslip case -- empty Activity Periods list)")
+
+_grid_j9_text = """
+Week commencing 17th Aug
+MonTueWedThuFriSatSun
+MTWTFSS
+Early Morning (00:00 - 06:00)
+\u25cf
+Monday.
+Activity PeriodsExpand
+"""
+check(
+    "the real J9 entry's Activity Periods list is genuinely empty (confirms this needs the fallback)",
+    scot.parse_activity_periods(_grid_j9_text, "2026-08-02T22:00:00", "2026-09-04T06:00:00") == [],
+)
+_grid_periods = scot.parse_calendar_grid_periods(_grid_j9_text, "2026-08-02T22:00:00", "2026-09-04T06:00:00")
+check("calendar grid fallback finds exactly 1 period", len(_grid_periods) == 1)
+check(
+    "correctly computed as Monday 17 Aug 00:00-06:00 (17 Aug 2026 is a Monday)",
+    _grid_periods[0] == ("2026-08-17T00:00:00", "2026-08-17T06:00:00"),
+)
+
+_real_j9_detail_html = """
+<html><body><main>
+<h2>Roadwork details</h2>
+Location
+M74 J9 Offslip SB -Total Closure
+Direction
+Southbound
+Starting
+2nd of August 2026, 10:00pm
+Ending
+4th of September 2026, 6:00am
+Days & times affected
+Week commencing 17th Aug
+MonTueWedThuFriSatSun
+MTWTFSS
+Early Morning (00:00 - 06:00)
+\u25cf
+Monday.
+Activity PeriodsExpand
+Roadwork description
+Works:
+Barrier Repair, Filter Drain, Inspections, Sign Installation/Repairs
+Traffic Management:
+Road Closure.
+Diversion Information:
+Follow mainline closure
+</main>
+Did you find what you were looking for?
+</body></html>
+"""
+_j9_entries = scot.parse_detail_page(
+    _real_j9_detail_html, "https://www.traffic.gov.scot/more-details?sid=cSW202669763&type=roadworks",
+)
+check("exactly ONE row produced (not the misleading 5-week span)", len(_j9_entries) == 1)
+check(
+    "shows the real answer -- Monday 17 Aug 00:00-06:00, not '02 Aug -> 04 Sep'",
+    _j9_entries[0]["start_datetime"] == "2026-08-17T00:00:00"
+    and _j9_entries[0]["end_datetime"] == "2026-08-17T06:00:00",
+)
+
+section("traffic_scotland: REGRESSION -- calendar grid fallback never overrides a populated Activity Periods list")
+
+_grid_j8j10_text = """
+Week commencing 17th Aug
+MonTueWedThuFriSatSun
+MTWTFSS
+Early Morning (00:00 - 06:00)
+    \u25cf
+Friday.
+Evening (18:00 - 00:00)
+   \u25cf
+Thursday.
+Activity PeriodsExpand
+- Thu 20th Aug - 22:00 to 23:59
+- Fri 21st Aug - 00:00 to 06:00
+"""
+_raw_j8j10 = scot.parse_activity_periods(_grid_j8j10_text, "2026-08-02T22:00:00", "2026-09-04T06:00:00")
+check("the precise Activity Periods list is found first and used, unaffected by the new fallback",
+      len(_raw_j8j10) == 2)
+check(
+    "precise times preserved (22:00-23:59) rather than the coarser Evening band (18:00-00:00)",
+    _raw_j8j10[0] == ("2026-08-20T22:00:00", "2026-08-20T23:59:00"),
+)
+
 section("traffic_scotland: clean_field_text (paren spacing + share-widget boilerplate)")
 
 check(
