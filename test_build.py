@@ -105,6 +105,62 @@ check(
     ],
 )
 
+section("matching: choose_icon (real examples from every source built in this project)")
+
+check(
+    "Travel Alert collision -> accident icon",
+    matching.choose_icon({
+        "cause": "Road traffic collision", "location": "M1 - Between J16 and J18 - Carriageway Closure",
+        "comment": "Northamptonshire - Road traffic collision - Expect Delays - Northbound",
+        "lane_info": "", "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_ACCIDENT,
+)
+check(
+    "NH Traffic Search congestion -> accident icon",
+    matching.choose_icon({
+        "cause": "Congestion", "location": "The M6 northbound between junctions J9 and J11",
+        "comment": "There are currently delays of 12 minutes against expected traffic",
+        "lane_info": "", "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_ACCIDENT,
+)
+check(
+    "real M74 J9 Offslip total closure -> slip road icon (location detail wins over generic roadworks cause)",
+    matching.choose_icon({
+        "cause": "Barrier Repair, Filter Drain, Inspections, Sign Installation/Repairs",
+        "location": "M74 J9 Offslip SB -Total Closure",
+        "comment": "Diversion: Follow mainline closure", "lane_info": "Road Closure.",
+        "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_SLIP_ROAD,
+)
+check(
+    "National Highways roadMaintenance WITH a real lane-restriction number -> lane closure icon (impact-based)",
+    matching.choose_icon({
+        "cause": "Road maintenance", "location": "M6 southbound between J40 and J39",
+        "comment": "", "lane_info": "", "lanes_restricted": 1, "lanes_operational": 2,
+    }) == matching.ICON_LANE_CLOSURE,
+)
+check(
+    "generic roadworks with no lane/slip/accident detail at all -> roadworks fallback",
+    matching.choose_icon({
+        "cause": "Road maintenance", "location": "M57 J4 to J6", "comment": "",
+        "lane_info": "", "lanes_restricted": None, "lanes_operational": None,
+    }) == matching.ICON_ROADWORKS,
+)
+check(
+    "rows_for_leg attaches a real icon filename to every row",
+    all(
+        r["icon"] in {matching.ICON_ACCIDENT, matching.ICON_SLIP_ROAD, matching.ICON_ROAD_CLOSED,
+                      matching.ICON_LANE_CLOSURE, matching.ICON_ROADWORKS}
+        for r in matching.rows_for_leg(
+            [{"road_name": "M6", "direction": "southBound", "location_description": "M6 J40",
+              "comment": "", "cause_type": "roadMaintenance", "lanes_restricted": 1,
+              "lanes_operational": 2, "start_datetime": "", "end_datetime": "",
+              "validity_status": "planned", "source_label": "test"}],
+            "M6", "southBound", 39, 41,
+        )
+    ),
+)
+
 section("matching: humanize_cause (camelCase identifiers vs. already-human text)")
 
 check(

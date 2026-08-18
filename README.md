@@ -30,6 +30,33 @@ new build — this is why a CSS fix can sometimes not show up on a phone
 even after a successful rebuild. The hash only changes when the file's
 actual content changes, so it doesn't force a refetch on every rebuild.
 
+## Row icons
+
+Each closure/incident row shows a small icon (`static/logos/*.png`),
+chosen by `matching.choose_icon()` from the row's cause/location/comment/
+lane text — checked in priority order, most specific/actionable first:
+
+1. `accident.png` — collision, fire, congestion, queue, breakdown, or
+   similar incident-flavoured cause
+2. `slip_road_closed.png` — location mentions a slip road specifically
+   (e.g. "M74 J9 Offslip SB")
+3. `road_closed.png` — a full/total/carriageway closure, or
+   `lanes_operational == 0`
+4. `lane_closure.png` — a real lane-restriction number or "lane closure"
+   text, even when the underlying cause is ordinary roadworks (this is
+   deliberately impact-based: a roadworks entry that closes one lane
+   gets the lane-closure icon, not the generic roadworks one)
+5. `roadworks.png` — fallback when nothing more specific matched; the
+   most common case in practice
+
+The five PNGs are supplied by the project owner directly into
+`static/logos/` — not part of this codebase's own files, and not
+regenerated or overwritten by any build step. `build.py`'s existing
+`shutil.copytree(STATIC_DIR, ...)` already copies the whole `static/`
+directory on every build, so nothing extra was needed to make icons
+ship correctly — dropping a new PNG in `static/logos/` and referencing
+its filename in `choose_icon()` is the entire integration surface.
+
 ## Project structure
 
 ```

@@ -157,6 +157,53 @@ def leg_direction_sort_key(closure: dict, j_from: int | None, j_to: int | None):
     return (1, closure.get("start_datetime") or "")
 
 
+# Small icon per row, picked from static/logos/ based on what kind of
+# entry it actually is. Checked in priority order -- an entry can
+# genuinely match more than one category (a slip-road closure IS also a
+# full closure), so this is deliberately "most specific/actionable
+# impact first, falls back to a generic roadworks icon only when nothing
+# more specific is available" rather than a strict cause-vs-impact split.
+ICON_ACCIDENT = "accident.png"
+ICON_SLIP_ROAD = "slip_road_closed.png"
+ICON_ROAD_CLOSED = "road_closed.png"
+ICON_LANE_CLOSURE = "lane_closure.png"
+ICON_ROADWORKS = "roadworks.png"  # fallback -- most common case in practice
+
+_ACCIDENT_KEYWORDS = (
+    "collision", "accident", "police led incident", "vehicle fire",
+    "congestion", "queue", "breakdown", "off strategic network incident",
+    "road traffic incident",
+)
+_SLIP_ROAD_KEYWORDS = ("slip road", "slip off", "slip on", "offslip", "onslip", "on-slip", "off-slip")
+_FULL_CLOSURE_KEYWORDS = ("total closure", "road closure", "carriageway closure", "full closure")
+_LANE_CLOSURE_KEYWORDS = ("lane closure", "lanes restricted")
+
+
+def choose_icon(row: dict) -> str:
+    """Pick an icon filename (served from static/logos/) representing
+    what kind of entry this row is, from its cause/location/comment/lane
+    text -- checked in priority order, most specific first:
+    accident/incident > slip road > full closure > lane restriction >
+    generic roadworks (the fallback when nothing more specific matched).
+    """
+    haystack = " ".join(str(x).lower() for x in (
+        row.get("cause") or "",
+        row.get("location") or "",
+        row.get("comment") or "",
+        row.get("lane_info") or "",
+    ))
+
+    if any(k in haystack for k in _ACCIDENT_KEYWORDS):
+        return ICON_ACCIDENT
+    if any(k in haystack for k in _SLIP_ROAD_KEYWORDS):
+        return ICON_SLIP_ROAD
+    if any(k in haystack for k in _FULL_CLOSURE_KEYWORDS) or row.get("lanes_operational") == 0:
+        return ICON_ROAD_CLOSED
+    if row.get("lanes_restricted") is not None or any(k in haystack for k in _LANE_CLOSURE_KEYWORDS):
+        return ICON_LANE_CLOSURE
+    return ICON_ROADWORKS
+
+
 def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
                   j_from: int | None, j_to: int | None) -> list[dict]:
     matches = [
@@ -193,7 +240,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
                 note = "/".join(f"J{j}" for j in uniq)
                 location_text = f"{location_text} \u2014 near {note}"
 
-        rows.append({
+        row = {
             "location": location_text,
             "comment": c.get("comment") or "",
             "start": format_dt(c.get("start_datetime", "")),
@@ -206,7 +253,9 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             "lane_info": c.get("lane_info") or "",
             "cause": humanize_cause(c.get("cause_type") or ""),
             "source_label": c.get("source_label") or "",
-        })
+        }
+        row["icon"] = choose_icon(row)
+        rows.append(row)
     return rows
 
 
