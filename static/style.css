@@ -165,7 +165,17 @@ button:focus-visible {
   color: var(--text-muted);
   line-height: 1.9;
 }
-.leg-chain-mini .mini-junc { margin-right: 2px; }
+/* Each road+junction pair (with its preceding arrow) wraps as one
+   unbreakable unit, so a narrow screen never splits a junction range
+   like "J45-J26" mid-way across two lines -- wrapping only ever
+   happens between whole legs instead. */
+.mini-leg {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.leg-chain-mini .mini-junc { margin-left: 2px; }
 .leg-chain-mini .mini-arrow { color: var(--amber); }
 
 /* --- Journey strip signature element (route page): the whole chain of
