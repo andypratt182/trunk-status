@@ -333,6 +333,120 @@ def parse_activity_periods(text: str, reference_start: str,
     return periods
 
 
+# "Week commencing 17th Aug" -- header for one week's block within the
+# calendar grid (no year given; inferred the same way as Activity Periods).
+WEEK_HEADER_RE = re.compile(r'Week commencing\s+(\d{1,2})\w{0,2}\s+([A-Za-z]+)', re.IGNORECASE)
+
+# "Early Morning (00:00 - 06:00)" or "Evening (18:00 - 00:00)" followed
+# (with a "\u25cf" marker and arbitrary whitespace/newlines in between,
+# not captured -- its exact rendering wasn't consistent between real
+# pages) by the single weekday name it's checked against, e.g.
+# "...Early Morning (00:00 - 06:00) \u25cf Monday." A band only appears
+# in the real page at all when at least one day is checked for it, so
+# this doesn't need to handle an unchecked/empty band.
+BAND_DAY_RE = re.compile(
+    r'(Early Morning|Evening)\s*\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)'
+    r'.*?'
+    r'\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b\.',
+    re.IGNORECASE | re.DOTALL,
+)
+
+_WEEKDAY_OFFSETS = {
+    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+    "friday": 4, "saturday": 5, "sunday": 6,
+}
+
+
+def parse_calendar_grid_periods(text: str, reference_start: str,
+                                 reference_end: str) -> list[tuple[str, str]]:
+    """Fallback for when the Activity Periods bulleted list is empty but
+    the weekly calendar grid still shows which specific day(s) a closure
+    is active. Real case that motivated this: an entry whose "Days &
+    times affected" section showed "Week commencing 17th Aug" with
+    "Early Morning (00:00 - 06:00)" checked on Monday, but had a
+    completely empty "Activity Periods" list underneath -- with only
+    parse_activity_periods() to go on, that closure fell back to showing
+    its full multi-week Starting/Ending span (misleading -- it's really
+    only active one morning), even though the calendar grid clearly had
+    the real answer sitting right there.
+
+    NOTE: this is coarser than parse_activity_periods() when both are
+    available -- the grid only gives a band-level time range (e.g. the
+    whole "Early Morning" 00:00-06:00 window), not the precise minutes a
+    bulleted Activity Periods line would give (e.g. "22:00 to 23:59").
+    That's why this is only ever used as a fallback, never allowed to
+    override a populated Activity Periods list -- see parse_detail_page.
+    """
+    ref_start_dt = None
+    ref_end_dt = None
+    try:
+        if reference_start:
+            ref_start_dt = datetime.fromisoformat(reference_start)
+        if reference_end:
+            ref_end_dt = datetime.fromisoformat(reference_end)
+    except ValueError:
+        pass
+
+    candidate_years = sorted({dt.year for dt in (ref_start_dt, ref_end_dt) if dt} or {datetime.now().year})
+
+    week_headers = list(WEEK_HEADER_RE.finditer(text))
+    periods = []
+
+    for i, wm in enumerate(week_headers):
+        week_day_str, week_month_name = wm.groups()
+        month = MONTH_ABBR.get(week_month_name.lower()[:3])
+        if not month:
+            continue
+        week_day = int(week_day_str)
+
+        # Bound this week's segment to just its own block -- up to the
+        # next "Week commencing" header, or the end of the grid,
+        # whichever comes first -- so a multi-week grid's bands/days
+        # don't bleed into each other.
+        segment_end = week_headers[i + 1].start() if i + 1 < len(week_headers) else len(text)
+        segment = text[wm.end():segment_end]
+        for boundary in ("Activity Periods", "Roadwork description"):
+            idx = segment.find(boundary)
+            if idx != -1:
+                segment = segment[:idx]
+
+        anchor_year = None
+        for year in candidate_years:
+            try:
+                candidate_monday = datetime(year, month, week_day)
+            except ValueError:
+                continue
+            if ref_start_dt and ref_end_dt:
+                if (ref_start_dt - timedelta(days=7)) <= candidate_monday <= (ref_end_dt + timedelta(days=1)):
+                    anchor_year = year
+                    break
+            else:
+                anchor_year = year
+                break
+        if anchor_year is None:
+            anchor_year = candidate_years[0]
+        try:
+            anchor_monday = datetime(anchor_year, month, week_day)
+        except ValueError:
+            continue
+
+        for bm in BAND_DAY_RE.finditer(segment):
+            _band_name, start_time, end_time, day_name = bm.groups()
+            offset = _WEEKDAY_OFFSETS.get(day_name.lower())
+            if offset is None:
+                continue
+            day_date = anchor_monday + timedelta(days=offset)
+            sh, sm = map(int, start_time.split(":"))
+            eh, em = map(int, end_time.split(":"))
+            period_start = day_date.replace(hour=sh, minute=sm)
+            period_end = day_date.replace(hour=eh, minute=em)
+            if period_end <= period_start:
+                period_end += timedelta(days=1)  # e.g. Evening 18:00 -> 00:00 wraps to the next day
+            periods.append((period_start.isoformat(), period_end.isoformat()))
+
+    return periods
+
+
 def merge_adjacent_periods(periods: list[tuple[str, str]],
                             gap_tolerance_minutes: int = 5) -> list[tuple[str, str]]:
     """Merge periods that abut across a midnight split -- e.g. "22:00 to
@@ -483,6 +597,14 @@ def parse_detail_page(html: str, href: str) -> list[dict]:
     }
 
     raw_periods = parse_activity_periods(days_times_text, overall_start, overall_end)
+    if not raw_periods:
+        # Some entries have a populated calendar grid (Week commencing /
+        # band / day checked) but an empty Activity Periods bulleted
+        # list underneath it -- fall back to the grid itself rather than
+        # falling all the way back to the misleading full Starting/Ending
+        # span. See parse_calendar_grid_periods()'s docstring for the
+        # real example that motivated this.
+        raw_periods = parse_calendar_grid_periods(days_times_text, overall_start, overall_end)
     merged_periods = merge_adjacent_periods(raw_periods)
 
     if merged_periods:
