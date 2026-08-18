@@ -46,6 +46,7 @@ from jinja2 import Environment, FileSystemLoader
 
 from matching import build_direction
 from sources.national_highways import fetch_from_flat_mirror, fetch_from_national_highways_api
+from sources.scotland_incidents import fetch_from_scotland_incidents
 from sources.traffic_scotland import fetch_from_traffic_scotland
 from sources.travel_alerts import fetch_from_travel_alerts
 from sources.xlsx_advance_notice import fetch_from_xlsx_advance_notice
@@ -112,6 +113,14 @@ def load_additional_closures(site_cfg: dict) -> list[dict]:
             try:
                 extra.extend(fetch_from_travel_alerts(
                     road_name=source["road_name"],
+                ))
+            except Exception as e:  # noqa: BLE001 -- additional sources are best-effort
+                print(f"Warning: additional source '{source_type}' failed ({e}) -- "
+                      f"continuing without it.")
+        elif source_type == "scotland_incidents_scraper":
+            try:
+                extra.extend(fetch_from_scotland_incidents(
+                    road_name=source.get("road_name", "M74"),
                 ))
             except Exception as e:  # noqa: BLE001 -- additional sources are best-effort
                 print(f"Warning: additional source '{source_type}' failed ({e}) -- "

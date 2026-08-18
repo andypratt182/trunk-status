@@ -87,6 +87,20 @@ site:
     # sources/travel_alerts.py) -- deliberately, since the source data
     # itself has none.
 
+    # Traffic Scotland "Current Incidents" -- live incidents/queues/
+    # closures on the Scotland side, complementing the roadworks
+    # scraper above. NOT auto-enabled -- add one entry per road, e.g.:
+    #   - type: "scotland_incidents_scraper"
+    #     road_name: "M74"
+    # Fully separate module from traffic_scotland.py (no cross-imports),
+    # so a change to one Scotland source can't affect the other. Real
+    # M74 entries were present when this was built (queues at J5/J2a),
+    # but broader testing was deliberately deferred until there's a real
+    # M74 incident to check the full pipeline against -- see
+    # sources/scotland_incidents.py's module docstring for the known
+    # limitation this implies (possible overlap with the roadworks
+    # scraper for the same physical closure, not yet resolved).
+
 routes:
   - id: axis
     name: "Axis"

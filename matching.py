@@ -92,7 +92,20 @@ def extract_junctions(closure: dict) -> list[int]:
 # for major incidents (2 of 3 alerts checked while building this were),
 # which would otherwise match neither a route's northbound nor
 # southbound leg and silently vanish from both.
-BOTH_DIRECTIONS_VALUES = {"both directions", "both", "both ways"}
+# Direction values meaning "affects every direction of travel" -- a
+# closure/alert reporting one of these should match a leg regardless of
+# that leg's own configured data_direction, rather than requiring an
+# exact (and therefore never-matching) string comparison. Real cases,
+# not hypothetical: National Highways' Travel Alerts frequently report
+# "Both directions" (2 of 3 alerts checked while building that source
+# were), and Traffic Scotland's incidents page uses a DIFFERENT phrasing
+# for the same thing -- "Northbound & Southbound" (seen on a real A9
+# closure) -- confirming this needs more than one exact string to catch
+# every real-world variant, not just the one first observed.
+BOTH_DIRECTIONS_VALUES = {
+    "both directions", "both", "both ways",
+    "northbound & southbound", "southbound & northbound",
+}
 
 
 def closure_matches_leg(closure: dict, road_name: str, data_direction: str,

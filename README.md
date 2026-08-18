@@ -40,6 +40,7 @@ sources/
   xlsx_advance_notice.py        National Highways advance-notice spreadsheet
   traffic_scotland.py           Traffic Scotland scraper (M74)
   travel_alerts.py               National Highways Travel Alerts scraper (major incidents)
+  scotland_incidents.py          Traffic Scotland incidents scraper (M74)
 test_build.py                   test suite for matching.py + all three sources
 routes.yaml                     route/leg definitions + data source config
 templates/, static/             Jinja templates and the day-filter JS/CSS
@@ -195,6 +196,57 @@ today" is misleading. This only ever affects "Today" in practice, since
 every other day option is entirely in the future by construction and
 can't already have ended. **All** is unaffected — it's the explicit
 "show me everything" view, past included, and never applies this check.
+
+## Additional source: Traffic Scotland incidents
+
+Traffic Scotland's public "Current Incidents" page
+(`/traffic-information/incidents`), complementing the roadworks scraper
+above with live incidents — queues, breakdowns, and closures. **Not
+auto-enabled** — add a `type: "scotland_incidents_scraper"` entry under
+`additional_sources` per road (commented-out example already in
+`routes.yaml`).
+
+**Fully self-contained** — `sources/scotland_incidents.py` has no
+imports from `sources/traffic_scotland.py`, deliberately, so a change to
+one Scotland source can never affect the other.
+
+**Single-stage, unlike the roadworks scraper.** Every field worth having
+(Direction, Incident type, Start time, and either a lane-restriction
+count or a free-text description) is already on the listing page
+itself — no separate detail-page fetch needed.
+
+**No end time, same reasoning as Travel Alerts.** This page has no
+structured end time anywhere, only a start time. `validity_status` is
+always `"active"` — an incident only appears on this page while it's
+ongoing.
+
+**Known limitation, left deliberately unresolved for now**: some
+`Incident type: Closure` entries turned out to actually be
+roadworks-caused (e.g. one read "closed... to allow for essential
+roadworks"), so the incident type label alone isn't a fully reliable way
+to separate "genuine live incident" from "roadworks also listed here."
+This means the same physical closure could plausibly appear twice — once
+via this source, once via the roadworks/planned-roadworks scraper.
+Real-world testing (including whether this overlap actually happens for
+your specific routes, and what to do about it if so) was deliberately
+deferred until there's a live M74 incident to check the full pipeline
+against, rather than guessing at a deduplication rule now.
+
+**Cross-road junction contamination guard, extended for a new pattern.**
+Same lesson as the roadworks scraper and Travel Alerts, but with a
+real hyphenated variant seen here that a space-only regex would miss:
+"A737 M8-J29 North - Slip Off" has no space between the road name and
+the junction. `strip_other_road_junctions()` here handles both the
+space and hyphen forms.
+
+**"Both directions" wildcard, extended for Traffic Scotland's own
+phrasing.** A real A9 closure used `"Northbound & Southbound"` instead
+of National Highways' `"Both directions"` — confirming this needed more
+than one exact string. Both are now in `matching.BOTH_DIRECTIONS_VALUES`.
+
+**Unverified against live markup** (same caveat as every other scraper
+in this project). If a live run logs `found 0 total incident(s)`, check
+`parse_incident_cards()` against the page's real structure.
 
 ## Additional source: Travel Alerts (major incidents)
 

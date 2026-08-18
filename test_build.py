@@ -20,6 +20,7 @@ import urllib.error
 import matching
 import build
 from sources import national_highways as nh
+from sources import scotland_incidents as si
 from sources import traffic_scotland as scot
 from sources import travel_alerts as ta
 from sources import xlsx_advance_notice as xlsx
@@ -950,6 +951,186 @@ check(
         "M6", "southBound", 45, 26,
     ),
 )
+check(
+    "'Northbound & Southbound' (Traffic Scotland's own phrasing, seen on a real A9 closure) "
+    "is ALSO treated as a wildcard, matching either direction",
+    matching.closure_matches_leg(
+        {"road_name": "M74", "direction": "Northbound & Southbound", "location_description": "M74 J5"},
+        "M74", "Northbound", 1, 10,
+    )
+    and matching.closure_matches_leg(
+        {"road_name": "M74", "direction": "Northbound & Southbound", "location_description": "M74 J5"},
+        "M74", "Southbound", 1, 10,
+    ),
+)
+
+
+# =======================================================================
+# sources/scotland_incidents.py
+# =======================================================================
+
+section("scotland_incidents: date parsing (real examples from the live page)")
+
+for text, expected in [
+    ("17th of August 2026, 8:14am", "2026-08-17T08:14:00"),
+    ("17th of August 2026, 8:29am", "2026-08-17T08:29:00"),
+    ("10th of August 2026, 11:37am", "2026-08-10T11:37:00"),
+    ("19th of July 2026, 11:02pm", "2026-07-19T23:02:00"),
+]:
+    check(f"{text!r} -> {expected}", si.parse_scottish_datetime(text) == expected)
+
+section("scotland_incidents: strip_other_road_junctions (real hyphenated case)")
+
+check(
+    "M8's own hyphenated junction ('M8-J29') is kept when M8 IS the target",
+    "J29" in si.strip_other_road_junctions("A737 M8-J29 North - Slip Off", "M8"),
+)
+check(
+    "M8's hyphenated junction is stripped when A737 is the target instead",
+    "J29" not in si.strip_other_road_junctions("A737 M8-J29 North - Slip Off", "A737"),
+)
+
+section("scotland_incidents: junction extraction from real M74 headings")
+
+for heading, expected in [
+    ("M74 J5 (Raith) North - slip off", [5]),
+    ("M74 J2a (Fullarton Road Junction)", [2]),
+    ("M74 J5 (Raith) South - slip off", [5]),
+]:
+    cleaned = si.strip_other_road_junctions(heading, "M74")
+    check(f"{heading!r} -> junctions {expected}", matching._junctions_in_text(cleaned) == expected)
+
+section("scotland_incidents: _INCIDENT_BLOCK_RE splits start-time text from the free-form detail line")
+
+_si_block = (
+    "M74 J5 (Raith) North - slip off\n"
+    "Direction:Northbound\n"
+    "Incident type:Queue\n"
+    "Start time:17th of August 2026, 8:29am\n"
+    "3 lanes restricted Northbound\n"
+    "More details"
+)
+_si_html = f"""
+<html><body><div class="incident-card">
+<h2>M74 J5 (Raith) North - slip off</h2>
+<p>Direction:Northbound</p>
+<p>Incident type:Queue</p>
+<p>Start time:17th of August 2026, 8:29am</p>
+<p>3 lanes restricted Northbound</p>
+<a href="/more-details?sid=c502270&type=incidents">More details</a>
+</div></body></html>
+"""
+_si_cards = si.parse_incident_cards(_si_html)
+check("one card parsed", len(_si_cards) == 1)
+check(
+    "start_text and detail correctly split at the date boundary "
+    "(a real bug caught here: two adjacent non-greedy regex groups with no "
+    "label between them took just the character '1' as the start time)",
+    _si_cards[0]["start_text"] == "17th of August 2026, 8:29am"
+    and _si_cards[0]["detail"] == "3 lanes restricted Northbound",
+)
+
+section("scotland_incidents: fetch_from_scotland_incidents (real listing page content)")
+
+_si_listing_html = """
+<html><body>
+<div class="incident-card">
+<h2>M74 J5 (Raith) North - slip off</h2>
+<p>Direction:Northbound</p>
+<p>Incident type:Queue</p>
+<p>Start time:17th of August 2026, 8:29am</p>
+<p>3 lanes restricted Northbound</p>
+<a href="/more-details?sid=c502270&type=incidents">More details</a>
+</div>
+<div class="incident-card">
+<h2>M74 J5 (Raith) South - slip off</h2>
+<p>Direction:Southbound</p>
+<p>Incident type:Queue</p>
+<p>Start time:17th of August 2026, 7:43am</p>
+<p>3 lanes restricted Southbound</p>
+<a href="/more-details?sid=c502261&type=incidents">More details</a>
+</div>
+<div class="incident-card">
+<h2>M74 J2a (Fullarton Road Junction)</h2>
+<p>Direction:Northbound</p>
+<p>Incident type:Queue</p>
+<p>Start time:17th of August 2026, 7:44am</p>
+<p>3 lanes restricted Northbound</p>
+<a href="/more-details?sid=c502260&type=incidents">More details</a>
+</div>
+<div class="incident-card">
+<h2>A9 Alness</h2>
+<p>Direction:Northbound & Southbound</p>
+<p>Incident type:Closure</p>
+<p>Start time:17th of August 2026, 8:00am</p>
+<p>The A9 at Alness is closed in both directions, due to a road traffic incident.</p>
+<a href="/more-details?sid=c502264&type=incidents">More details</a>
+</div>
+<div class="incident-card">
+<h2>M77 J2 North - Slip On</h2>
+<p>Direction:Northbound</p>
+<p>Incident type:Queue</p>
+<p>Start time:17th of August 2026, 8:14am</p>
+<p>2 lanes restricted Northbound</p>
+<a href="/more-details?sid=c502269&type=incidents">More details</a>
+</div>
+</body></html>
+"""
+
+
+class _FakeSiResp:
+    def __init__(self, data):
+        self._data = data.encode()
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+import urllib.request as _urllib_request_si
+
+_original_si_urlopen = _urllib_request_si.urlopen
+_urllib_request_si.urlopen = lambda req, timeout=60: _FakeSiResp(_si_listing_html)
+try:
+    _si_m74_results = si.fetch_from_scotland_incidents("M74")
+    _si_a9_results = si.fetch_from_scotland_incidents("A9")
+finally:
+    _urllib_request_si.urlopen = _original_si_urlopen
+
+check("M74 filter finds exactly the 3 real M74 entries", len(_si_m74_results) == 3)
+check(
+    "M77 correctly excluded (different road, not a substring false-match)",
+    not any("M77" in r["location_description"] for r in _si_m74_results),
+)
+
+_si_raith_north = next(
+    r for r in _si_m74_results if "J5" in r["location_description"] and r["direction"] == "Northbound"
+)
+check("lanes_restricted correctly extracted as a real number", _si_raith_north["lanes_restricted"] == 3)
+check("start_datetime correctly parsed", _si_raith_north["start_datetime"] == "2026-08-17T08:29:00")
+check("end_datetime empty -- honest, no end time in the source", _si_raith_north["end_datetime"] == "")
+check("validity_status always 'active'", _si_raith_north["validity_status"] == "active")
+check("cause_type is the incident type", _si_raith_north["cause_type"] == "Queue")
+check("source_label correctly set", _si_raith_north["source_label"] == "Traffic Scotland Incident")
+
+check("A9 filter finds the one closure entry", len(_si_a9_results) == 1)
+_si_a9 = _si_a9_results[0]
+check(
+    "A9's lanes_restricted is None (detail was a description, not a lane count)",
+    _si_a9["lanes_restricted"] is None,
+)
+check(
+    "A9's free-text description correctly stored in comment instead",
+    "closed in both directions" in _si_a9["comment"],
+)
+
+_si_rows = matching.rows_for_leg(_si_m74_results, "M74", "Northbound", 1, 10)
+check("correctly matches an M74 J1-10 style leg (2 real northbound M74 entries)", len(_si_rows) == 2)
 
 
 # =======================================================================
