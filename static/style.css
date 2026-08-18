@@ -353,11 +353,35 @@ table.closures tbody tr:last-child td { border-bottom: none; }
   height: 20px;
   border-radius: 3px;
 }
-.location-cell .comment {
-  display: block;
+/* More Info -- a native <details>/<summary> disclosure, so the
+   collapse/expand behaviour (including the triangle marker) comes free
+   from the browser, no JS needed. The default marker is replaced with a
+   custom one so it matches this project's own styling instead of each
+   browser's own default triangle glyph. */
+.more-info-cell details {
+  font-size: 0.82rem;
+}
+.more-info-cell summary {
+  cursor: pointer;
+  color: var(--amber);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+.more-info-cell summary::-webkit-details-marker { display: none; }
+.more-info-cell summary::before {
+  content: "\25b6";
+  font-size: 0.7em;
+  transition: transform 0.15s ease;
+}
+.more-info-cell details[open] summary::before {
+  transform: rotate(90deg);
+}
+.more-info-cell details p {
+  margin: 6px 0 0;
   color: var(--text-muted);
-  font-size: 0.78rem;
-  margin-top: 2px;
 }
 
 .empty-state {
@@ -424,24 +448,29 @@ footer.site-footer {
     font-weight: 600;
     max-width: none;
   }
-  /* Icon sits at the top-right of the card, with the rest of the card's
-     content (Location's heading and wrapped text especially) flowing
-     around it -- rather than absolute positioning, which takes the icon
-     out of the document flow entirely, so nothing else "knows" to leave
-     room for it. Confirmed as a real problem at this icon's actual size
-     (160x90 -- much taller than the 34x34 this was first built at): with
-     absolute positioning, the icon visibly covered the Location heading
-     underneath it. float: right avoids that at any icon size, since the
-     browser automatically wraps subsequent block content around a float
-     rather than needing hand-tuned pixel offsets that would need
-     re-tuning any time the icon's size changes.
-     Suppressing its own ::before label -- a floated icon like this reads
+  /* Icon pinned to the top-right corner of the card, aligned with the
+     top of Status and matching the card's own padding on both the top
+     and right (14px/16px, same as the card's own padding shorthand
+     above) -- rather than float: right, which places it wherever it
+     falls in document flow (right after Status), visually lining it up
+     with Location's top instead of the card's actual top-right corner.
+     Absolute positioning was tried first, abandoned for float when the
+     icon was much bigger (160x90) and visibly covered the Location
+     heading underneath it -- but at this size (80x45, under half that
+     height) there's no such overlap, confirmed visually rather than
+     assumed. Requires the <tr> itself to be the positioning anchor,
+     since the card's border/padding/rounded corners all live on the
+     <tr> in this design, not a wrapping <div>.
+     Suppressing its own ::before label -- a corner icon like this reads
      as decoration, not a labelled field like the others. */
+  table.closures tr { position: relative; }
   table.closures td.icon-cell {
-    float: right;
+    position: absolute;
+    top: 14px;
+    right: 16px;
     display: block;
     width: auto;
-    margin: 0 0 8px 12px;
+    margin: 0;
     padding: 0;
   }
   table.closures td.icon-cell .row-icon {
@@ -450,6 +479,13 @@ footer.site-footer {
     height: 45px;
   }
   table.closures td.icon-cell::before { content: none; }
+  /* The <summary> text ("More Information") already labels this field
+     -- a "MORE INFO" ::before label above it as well would be redundant.
+     Also collapse the cell's own padding when there's nothing in it
+     (comment was empty, so no <details> was rendered), so an empty More
+     Info field doesn't leave a blank gap in the card. */
+  table.closures td.more-info-cell::before { content: none; }
+  table.closures td.more-info-cell:empty { padding: 0; }
   /* table.closures tr { display: block; } above has higher specificity
      than the browser's default [hidden] { display: none; }, which would
      otherwise leave day-filter/live-status-hidden rows visibly showing
