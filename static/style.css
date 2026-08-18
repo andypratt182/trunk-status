@@ -424,21 +424,27 @@ footer.site-footer {
     font-weight: 600;
     max-width: none;
   }
-  /* Icon sits to the right of Status, both on one line, with Location
-     starting a fresh line below -- rather than becoming its own full-
-     width row like every other field. Suppressing its own ::before
-     label since "Status [icon]" reads as one unit; a second "TYPE"
-     label between them would visually split what's meant to look
-     unified. */
-  table.closures td[data-label="Status"],
+  /* Icon sits pinned to the top-right corner of the card, flush with
+     the card's own padding, rather than inline in the normal flow of
+     fields -- so it stays fixed there regardless of how much Status/
+     Location/etc. text wraps to. Requires the <tr> itself to be the
+     positioning anchor (position: relative), since the card's border/
+     padding/rounded corners all live on the <tr>, not a wrapping div.
+     Suppressing its own ::before label -- a floating corner icon reads
+     as decoration, not a labelled field like the others. */
+  table.closures tr { position: relative; }
   table.closures td.icon-cell {
-    display: inline-block;
+    position: absolute;
+    top: 14px;
+    right: 16px;
+    display: block;
     width: auto;
-    vertical-align: middle;
+    margin: 0;
+    padding: 0;
   }
-  table.closures td.icon-cell {
-    margin-left: 10px;
-    padding-top: 0;
+  table.closures td.icon-cell .row-icon {
+    width: 34px;
+    height: 34px;
   }
   table.closures td.icon-cell::before { content: none; }
   /* table.closures tr { display: block; } above has higher specificity
