@@ -214,6 +214,15 @@ check(
     matching.detect_slip_road("M6 southbound between J40 and J39, Lane 3 closure") == ""
     and matching.detect_slip_road("Road maintenance on the hard shoulder") == "",
 )
+check(
+    "real reported bug: National Highways' official 'entry slip road'/'exit slip road' "
+    "terminology now correctly gives a direction, instead of falling through to the "
+    "generic 'Slip road' label -- the original regex only recognized 'on'/'off' next "
+    "to 'slip', which Traffic Scotland uses but National Highways doesn't",
+    matching.detect_slip_road("M6 southbound entry slip road closure at J40") == "Entry Slip Road"
+    and matching.detect_slip_road("M6 northbound exit slip road closed J20") == "Exit Slip Road"
+    and matching.detect_slip_road("The M6 entry slip road at junction 15 is closed") == "Entry Slip Road",
+)
 
 section("matching: rows_for_leg -- real reported bug, diversion text falsely triggering slip-road detection")
 

@@ -215,22 +215,34 @@ def choose_icon(row: dict) -> str:
 
 # "on"/"off" can appear either side of "slip" depending on the source --
 # "Offslip" (no separator), "off-slip", "off slip", or reversed as
-# "slip off" -- all seen in real data. Whichever group matches gives the
-# direction regardless of which side of "slip" it's on.
-_SLIP_DIRECTION_RE = re.compile(r'\b(?:(on|off)[\s-]?slip|slip[\s-]?(on|off))\b', re.IGNORECASE)
+# "slip off" -- all seen in real Traffic Scotland data. National Highways
+# uses the official UK terminology instead -- "entry slip road"/"exit
+# slip road" -- which "on"/"off" alone never matched, so those fell
+# through to the generic "Slip road" label with no direction. Whichever
+# group matches gives the direction regardless of which side of "slip"
+# it's on.
+_SLIP_DIRECTION_RE = re.compile(
+    r'\b(?:(on|off|entry|exit)[\s-]?slip|slip[\s-]?(on|off|entry|exit))\b', re.IGNORECASE,
+)
 _SLIP_ROAD_RE = re.compile(r'\bslip\s*road\b', re.IGNORECASE)
+
+# "on"/"entry" both mean the same thing (joining the motorway); "off"/
+# "exit" both mean leaving it.
+_ENTRY_WORDS = {"on", "entry"}
 
 
 def detect_slip_road(text: str) -> str:
     """Detect and normalize slip-road terminology, which varies wildly
     across sources -- real examples seen: "Offslip", "slip off",
-    "Onslip", "on-slip", "Slip Off", "slip road". Returns "Entry Slip
-    Road", "Exit Slip Road", "Slip road" (direction unspecified), or ""
-    if no slip-road mention is found at all."""
+    "Onslip", "on-slip", "Slip Off", "slip road" (Traffic Scotland);
+    "entry slip road", "exit slip road" (National Highways' official UK
+    terminology). Returns "Entry Slip Road", "Exit Slip Road", "Slip
+    road" (direction unspecified), or "" if no slip-road mention is
+    found at all."""
     m = _SLIP_DIRECTION_RE.search(text)
     if m:
         direction = (m.group(1) or m.group(2)).lower()
-        return "Entry Slip Road" if direction == "on" else "Exit Slip Road"
+        return "Entry Slip Road" if direction in _ENTRY_WORDS else "Exit Slip Road"
     if _SLIP_ROAD_RE.search(text):
         return "Slip road"
     return ""

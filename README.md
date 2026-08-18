@@ -57,17 +57,23 @@ source happened to use for its own direction field.
 
 **Slip-road terminology is detected and normalized too**, via
 `matching.detect_slip_road()` — real variants seen across sources:
-"Offslip" (no separator), "slip off" (reversed order), "Slip Off"
-(capitalized), plausible "Onslip"/"on-slip"/"slip on" equivalents, and
-bare "slip road" with no on/off specified. All normalize to "Entry Slip
-Road", "Exit Slip Road", or "Slip road" and append as a qualifier, e.g.
-`"M74(S) J9 (Exit Slip Road)"`. This was added as a deliberate second
-pass: the first version of the normalized location dropped slip-road
-information entirely, which is a real, meaningful distinction (a
-slip-road closure behaves very differently from a mainline one), not
-just descriptive noise safe to strip out. Qualifiers combine into one
-parenthetical when more than one applies, e.g. `"M74(S) J22 (Exit Slip
-Road, near)"`, rather than stacking separate parenthetical groups.
+Traffic Scotland uses "Offslip" (no separator), "slip off" (reversed
+order), "Slip Off" (capitalized), plausible "Onslip"/"on-slip"/"slip on"
+equivalents, and bare "slip road" with no on/off specified; National
+Highways instead uses the official UK terminology, "entry slip road"/
+"exit slip road" — a real bug caught in production: the original regex
+only recognized "on"/"off" next to "slip" (Traffic Scotland's style), so
+every National Highways slip-road entry fell through to the generic
+"Slip road" label with no direction, since "entry"/"exit" were never
+recognized at all. All variants normalize to "Entry Slip Road", "Exit
+Slip Road", or "Slip road" and append as a qualifier, e.g. `"M74(S) J9
+(Exit Slip Road)"`. This was added as a deliberate second pass: the
+first version of the normalized location dropped slip-road information
+entirely, which is a real, meaningful distinction (a slip-road closure
+behaves very differently from a mainline one), not just descriptive
+noise safe to strip out. Qualifiers combine into one parenthetical when
+more than one applies, e.g. `"M74(S) J22 (Exit Slip Road, near)"`,
+rather than stacking separate parenthetical groups.
 
 **Deliberately scans ONLY the raw location text, never the comment/
 diversion text, for slip-road detection.** A real bug caught in
