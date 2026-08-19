@@ -214,9 +214,17 @@ def format_dt(iso_str: str) -> str:
     if not iso_str:
         return ""
     try:
-        return datetime.fromisoformat(iso_str).strftime("%d %b %Y, %H:%M")
+        dt = datetime.fromisoformat(iso_str)
     except ValueError:
         return iso_str
+    # 12-hour time, no leading zero on the hour, period separator,
+    # lowercase am/pm (e.g. "9.30 am", "12.00 pm") -- computed manually
+    # rather than via a %-I / %#I strftime extension, since those aren't
+    # portable across platforms (GNU vs Windows use different flags) and
+    # this needs to behave identically regardless of where it runs.
+    hour12 = dt.hour % 12 or 12
+    ampm = "am" if dt.hour < 12 else "pm"
+    return f"{dt.strftime('%d %b %Y')}, {hour12}.{dt.minute:02d} {ampm}"
 
 
 def road_badge_class(road_name: str) -> str:
