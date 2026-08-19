@@ -422,9 +422,9 @@ footer.site-footer {
   }
 
   /* Status / icon / location / lanes / cause / start / end / more info */
-  table.closures th:nth-child(1) { width: 9%; }
+  table.closures th:nth-child(1) { width: 7%; }
   table.closures th:nth-child(2) { width: 4%; }
-  table.closures th:nth-child(3) { width: 11%; }
+  table.closures th:nth-child(3) { width: 13%; }
   table.closures th:nth-child(4) { width: 18%; }
   table.closures th:nth-child(5) { width: 20%; }
   table.closures th:nth-child(6),
