@@ -402,6 +402,41 @@ footer.site-footer {
   font-size: 0.76rem;
 }
 
+/* Desktop table: reserve enough space for the data-dense columns. */
+@media (min-width: 641px) {
+  .wrap {
+    max-width: 1320px;
+  }
+
+  table.closures {
+    min-width: 0;
+    table-layout: fixed;
+    font-size: 0.82rem;
+  }
+
+  table.closures th,
+  table.closures td {
+    padding: 10px;
+  }
+
+  /* Status / icon / location / lanes / cause / start / end / info / source */
+  table.closures th:nth-child(1) { width: 8%; }
+  table.closures th:nth-child(2) { width: 4%; }
+  table.closures th:nth-child(3) { width: 10%; }
+  table.closures th:nth-child(4) { width: 17%; }
+  table.closures th:nth-child(5) { width: 18%; }
+  table.closures th:nth-child(6),
+  table.closures th:nth-child(7) { width: 9%; }
+  table.closures th:nth-child(8) { width: 12%; }
+  table.closures th:nth-child(9) { width: 13%; }
+
+  table.closures td:first-child,
+  .more-info-cell,
+  .source-cell {
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 640px) {
   .site-header .wrap { flex-direction: column; align-items: flex-start; }
   .feed-meta { text-align: left; }
