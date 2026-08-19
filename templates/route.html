@@ -67,8 +67,16 @@
             {% else %}—{% endif %}
           </td>
           <td data-label="Cause">{{ row.cause }}</td>
-          <td class="datetime-cell" data-label="Start">{{ row.start }}</td>
-          <td class="datetime-cell" data-label="End">{{ row.end }}</td>
+          <td class="datetime-cell" data-label="Start">
+            {% set start_parts = row.start.split(', ', 1) %}
+            {{ start_parts[0] }}<br>
+            {% if start_parts|length > 1 %}{{ start_parts[1] }}{% endif %}
+          </td>
+          <td class="datetime-cell" data-label="End">
+            {% set end_parts = row.end.split(', ', 1) %}
+            {{ end_parts[0] }}<br>
+            {% if end_parts|length > 1 %}{{ end_parts[1] }}{% endif %}
+          </td>
           <td class="more-info-cell" data-label="More Info">
             <details>
               <summary>More Information</summary>
