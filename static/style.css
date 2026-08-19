@@ -338,10 +338,12 @@ table.closures tbody tr:last-child td { border-bottom: none; }
 
 .lanes-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .datetime-cell { font-weight: 700; }
-.source-cell {
+.closure-source {
+  margin: 10px 0 0 !important;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-border);
+  color: var(--text-muted) !important;
   font-size: 0.74rem;
-  color: var(--text-muted);
-  white-space: nowrap;
 }
 .location-cell { max-width: 320px; }
 .icon-header, .icon-cell {
@@ -419,20 +421,17 @@ footer.site-footer {
     padding: 10px;
   }
 
-  /* Status / icon / location / lanes / cause / start / end / info / source */
-  table.closures th:nth-child(1) { width: 8%; }
+  /* Status / icon / location / lanes / cause / start / end / more info */
+  table.closures th:nth-child(1) { width: 9%; }
   table.closures th:nth-child(2) { width: 4%; }
-  table.closures th:nth-child(3) { width: 10%; }
-  table.closures th:nth-child(4) { width: 17%; }
-  table.closures th:nth-child(5) { width: 18%; }
+  table.closures th:nth-child(3) { width: 11%; }
+  table.closures th:nth-child(4) { width: 18%; }
+  table.closures th:nth-child(5) { width: 20%; }
   table.closures th:nth-child(6),
-  table.closures th:nth-child(7) { width: 9%; }
-  table.closures th:nth-child(8) { width: 12%; }
-  table.closures th:nth-child(9) { width: 13%; }
+  table.closures th:nth-child(7) { width: 10%; }
+  table.closures th:nth-child(8) { width: 18%; }
 
-  table.closures td:first-child,
-  .more-info-cell,
-  .source-cell {
+  table.closures td:first-child {
     white-space: nowrap;
   }
 }
