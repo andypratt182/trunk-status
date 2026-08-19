@@ -133,8 +133,7 @@ button:focus-visible {
   border-top: 1px solid var(--panel-border);
 }
 .direction-row:first-child { border-top: none; }
-.direction-row a { color: var(--text); font-weight: 600; }
-.direction-row a:hover { color: var(--amber); }
+.direction-row a { color: var(--amber); font-weight: 600; text-decoration: underline; }
 .count-pill {
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -338,6 +337,7 @@ table.closures tbody tr:last-child td { border-bottom: none; }
 .status-suspended { color: var(--grey-status); }
 
 .lanes-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.datetime-cell { font-weight: 700; }
 .source-cell {
   font-size: 0.74rem;
   color: var(--text-muted);
