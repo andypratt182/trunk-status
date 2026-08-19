@@ -307,8 +307,102 @@ def extract_services_name(text: str) -> str:
     return m.group(1) if m else ""
 
 
+# Named interchanges/termini that aren't a numbered junction on the road
+# itself -- e.g. "Switch Island" (Merseyside), where the M58 physically
+# ends and meets the M57/A5036. Detects "J<N> to <Place>" in raw
+# location text (e.g. "jct 1 to Switch Island"), so a closure genuinely
+# reaching a named terminus can show that instead of just the bare
+# junction number, which alone doesn't convey where the closure actually
+# reaches. The "j(?:ct)?" part is matched case-insensitively (the real
+# text uses lowercase "jct"), scoped with an inline (?i:...) flag rather
+# than the whole pattern, since the place-name part deliberately needs
+# to stay case-SENSITIVE (requires Title Case) to distinguish it from
+# ordinary lowercase text following "to".
+_JUNCTION_TO_PLACE_RE = re.compile(
+    r"(?i:j(?:ct)?\.?)\s*(\d+[A-Z]?)\s+to\s+([A-Z][a-z][A-Za-z'-]*(?:\s+[A-Z][a-z][A-Za-z'-]*)*)"
+)
+
+
+def extract_junction_to_place(text: str) -> tuple[str, str] | None:
+    """Detect a "J<N> to <Place>" pattern in raw location text -- see
+    the comment on _JUNCTION_TO_PLACE_RE. Returns (junction_number_str,
+    place_name), or None if no such pattern is found."""
+    m = _JUNCTION_TO_PLACE_RE.search(text)
+    if not m:
+        return None
+    return m.group(1), m.group(2).strip()
+
+
+# Known road continuations within THIS PROJECT's own configured routes
+# -- M74 Southbound becomes M6 Southbound (both Axis and Omega configure
+# this same M74->M6 sequence). A junction number outside this leg's own
+# configured range likely belongs to the continuing road, not this one
+# -- real case: Traffic Scotland's raw M74 text "J22 - J45" is really
+# describing a closure spanning from M74's own J22 all the way onto the
+# M6's J45, which doesn't exist as an M74 junction at all (M74 tops out
+# around J22 in this project's own configuration). This is deliberately
+# hardcoded to this ONE specific continuation this project's own routes
+# actually use -- there's no way to derive "M74 continues into M6" from
+# the text itself; it's real-world road topology knowledge that has to
+# come from somewhere, and routes.yaml's own configured leg ranges are
+# the only source of that knowledge already available here. If the
+# route configuration ever adds a different road that also connects to
+# M74, or removes this M74->M6 sequence, this mapping needs updating by
+# hand to match -- it will not automatically infer a different
+# continuation from routes.yaml, only use the leg's own j_from/j_to
+# bounds to decide whether a junction is in- or out-of-range.
+_KNOWN_ROAD_CONTINUATIONS = {"M74": "M6"}
+
+
+def label_junction_for_display(road_name: str, junction: int,
+                                j_from: int | None, j_to: int | None) -> str:
+    """Format one junction number for display, prefixing it with a
+    known continuing road's name if it falls outside this leg's own
+    configured range -- see the comment on _KNOWN_ROAD_CONTINUATIONS for
+    why, and why this is deliberately narrow rather than general."""
+    if j_from is not None and j_to is not None:
+        lo, hi = sorted((j_from, j_to))
+        if not (lo <= junction <= hi):
+            continuation = _KNOWN_ROAD_CONTINUATIONS.get(road_name.upper())
+            if continuation:
+                return f"{continuation} J{junction}"
+    return f"J{junction}"
+
+
+def format_junction_display(road_name: str, junctions: list[int], j_from: int | None,
+                             j_to: int | None, place_name: str = "", range_end_place: str = "") -> str:
+    """Compute just the junction/place portion of a location summary
+    (everything after "RoadName(Direction)"). Handles three cases: a
+    named service station replacing a bare junction number entirely
+    (place_name); a known road continuation labeling an out-of-range
+    junction with its real road, e.g. "M6 J45" when M74 doesn't have a
+    J45 (via label_junction_for_display); and a junction paired with a
+    named terminus/interchange, e.g. "J1 - Switch Island"
+    (range_end_place). When a continuation label is used, the separator
+    between a plain "J22" and a road-prefixed "M6 J45" gets surrounding
+    spaces (" - ") rather than the usual bare hyphen, since "J22-M6 J45"
+    reads worse than "J8-J22" does -- detected by checking whether
+    either label contains a space (a plain "J<N>" never does, a
+    continuation label like "M6 J45" always does)."""
+    if place_name:
+        return place_name
+    if not junctions:
+        return ""
+    uniq = sorted(set(junctions))
+    if range_end_place and len(uniq) == 1:
+        return f"J{uniq[0]} - {range_end_place}"
+    if len(uniq) == 1:
+        return label_junction_for_display(road_name, uniq[0], j_from, j_to)
+    lo_label = label_junction_for_display(road_name, uniq[0], j_from, j_to)
+    hi_label = label_junction_for_display(road_name, uniq[-1], j_from, j_to)
+    separator = " - " if (" " in lo_label or " " in hi_label) else "-"
+    return f"{lo_label}{separator}{hi_label}"
+
+
 def format_location(road_name: str, direction_letter: str, junctions: list[int],
-                     qualifiers: list[str] | None = None, place_name: str = "") -> str:
+                     qualifiers: list[str] | None = None, place_name: str = "",
+                     j_from: int | None = None, j_to: int | None = None,
+                     range_end_place: str = "") -> str:
     """Build a consistent 'M74(S) J9' style location summary from
     already-extracted structured fields, rather than displaying each
     source's own free-text location description verbatim -- which
@@ -324,17 +418,12 @@ def format_location(road_name: str, direction_letter: str, junctions: list[int],
     second pass after the first version of this function dropped it
     entirely; it's real, useful information (a slip-road closure behaves
     very differently from a mainline one), not just descriptive noise to
-    strip out. place_name (e.g. "Gretna Services"), when given, replaces
-    the junction number rather than sitting alongside it -- a named
-    service station doesn't have its own junction number (it sits
-    between two), so showing both would misleadingly imply the closure
-    is precisely at that junction."""
+    strip out. See format_junction_display() for what place_name,
+    j_from/j_to, and range_end_place each do."""
     parts = [f"{road_name}({direction_letter})" if direction_letter else road_name]
-    if place_name:
-        parts.append(place_name)
-    elif junctions:
-        uniq = sorted(set(junctions))
-        parts.append(f"J{uniq[0]}" if len(uniq) == 1 else f"J{uniq[0]}-J{uniq[-1]}")
+    junction_part = format_junction_display(road_name, junctions, j_from, j_to, place_name, range_end_place)
+    if junction_part:
+        parts.append(junction_part)
     text = " ".join(parts)
     if qualifiers:
         text += f" ({', '.join(qualifiers)})"
@@ -388,6 +477,19 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         # -- a junction stated directly in the location text is reliable
         # and shouldn't be overridden by this.
         services_name = extract_services_name(raw_location) if used_fallback else ""
+        # A junction paired with a named terminus/interchange (e.g. "jct
+        # 1 to Switch Island", where the M58 physically ends), checked
+        # against the location text specifically -- not scoped to the
+        # fallback case, since the junction here IS stated directly, it's
+        # just accompanied by a place name for where the closure's other
+        # end actually reaches. Confirmed the extracted junction number
+        # actually matches one we already found, before trusting it.
+        junction_to_place = extract_junction_to_place(raw_location)
+        range_end_place = ""
+        if junction_to_place:
+            place_junction_str, place_name_text = junction_to_place
+            if place_junction_str.isdigit() and int(place_junction_str) in all_junctions:
+                range_end_place = place_name_text
 
         if resolved_road:
             qualifiers = []
@@ -402,6 +504,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             junctions_to_show = [] if services_name else all_junctions
             location_text = format_location(
                 resolved_road, direction_display, junctions_to_show, qualifiers, services_name,
+                j_from, j_to, range_end_place,
             )
         else:
             # Nothing structured enough to build a clean summary from --

@@ -345,6 +345,75 @@ check(
     len(matching.rows_for_leg([_m61_pattern_on_different_road], "M57", "northBound", 4, 6)) == 1,
 )
 
+section("matching: extract_junction_to_place (real reported case -- M58 ending at Switch Island)")
+
+check(
+    "'jct 1 to Switch Island' correctly extracted",
+    matching.extract_junction_to_place("M58 westbound jct 1 to Switch Island carriageway closure")
+    == ("1", "Switch Island"),
+)
+check(
+    "no such pattern -> None",
+    matching.extract_junction_to_place("M6 southbound between J40 and J39, Lane 3 closure") is None,
+)
+
+_real_m58_switch_island = {
+    "road_name": "M58", "direction": "Westbound",
+    "location_description": "M58 westbound jct 1 to Switch Island carriageway closure",
+    "comment": "Overall Scheme Details: M58 westbound M58 to Switch Island - carriageway closure "
+               "for carriageway - reconstruction/renewal on behalf of National Highways",
+    "cause_type": "advanceNoticeFullClosure", "lanes_operational": 0,
+    "start_datetime": "2026-08-20T21:00:00", "end_datetime": "2026-08-21T05:00:00",
+    "validity_status": "planned", "source_label": "Advance notice (full closure)",
+}
+_m58_rows = matching.rows_for_leg([_real_m58_switch_island], "M58", "Westbound", None, None)
+check("one row produced", len(_m58_rows) == 1)
+check(
+    "shows the real terminus name paired with the junction, not just a bare 'J1' -- "
+    "Switch Island is where the M58 physically ends, meeting the M57/A5036",
+    _m58_rows[0]["location"] == "M58(W) J1 - Switch Island",
+)
+
+section("matching: label_junction_for_display / M74->M6 continuation (real reported case)")
+
+check(
+    "an out-of-range M74 junction is labeled with the continuing road (M6)",
+    matching.label_junction_for_display("M74", 45, 8, 22) == "M6 J45",
+)
+check(
+    "an in-range M74 junction is shown plainly, no continuation label",
+    matching.label_junction_for_display("M74", 15, 8, 22) == "J15",
+)
+check(
+    "M6 itself has no configured continuation -- an out-of-range M6 junction is shown plainly",
+    matching.label_junction_for_display("M6", 100, 26, 45) == "J100",
+)
+
+_real_m74_switch_to_m6 = {
+    "road_name": "M74", "direction": "Southbound",
+    "location_description": "M74 SB J22 - J45 - Road Closure",
+    "comment": "Diversion: J22 offslip, Kirkstyle, A6071, A7, J44",
+    "cause_type": "Third Party Works", "lane_info": "Road Closure.",
+    "start_datetime": "2026-09-07T20:00:00", "end_datetime": "2026-09-08T06:00:00",
+    "validity_status": "planned", "source_label": "Traffic Scotland (scraped)",
+}
+_m74_continuation_rows = matching.rows_for_leg([_real_m74_switch_to_m6], "M74", "southBound", 8, 22)
+check("one row produced", len(_m74_continuation_rows) == 1)
+check(
+    "shows 'J22 - M6 J45', not the misleading 'J22-J45' -- M74 doesn't have a J45 at all, "
+    "the M74 southbound leg becomes the M6 southbound leg at exactly this point",
+    _m74_continuation_rows[0]["location"] == "M74(S) J22 - M6 J45",
+)
+check(
+    "regression: a normal M74 range with BOTH junctions in range is completely unaffected, "
+    "still uses the plain no-space hyphen",
+    matching.rows_for_leg(
+        [{"road_name": "M74", "direction": "Southbound",
+          "location_description": "M74 J8 - J10 SB - Total Closure", "comment": ""}],
+        "M74", "southBound", 8, 22,
+    )[0]["location"] == "M74(S) J8-J10",
+)
+
 section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
 
 gretna_style = {

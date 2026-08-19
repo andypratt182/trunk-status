@@ -138,6 +138,53 @@ as `<td ...></td>` with literally zero characters between the tags when
 there's no comment — confirmed with a test that checks the raw rendered
 HTML, not just that the visible page looks right.
 
+## Named termini and cross-road junction continuations
+
+Two related, deliberately narrow display improvements, both from real
+reported entries where a bare junction number alone was misleading:
+
+**A junction paired with a named terminus** (e.g. "M58 westbound jct 1
+to Switch Island carriageway closure" — Switch Island, Merseyside, is
+where the M58 physically ends and meets the M57/A5036).
+`matching.extract_junction_to_place()` detects the "J&lt;N&gt; to
+&lt;Place&gt;" pattern in raw location text and, once the extracted
+junction number is confirmed to match one already found, shows `"M58(W)
+J1 - Switch Island"` instead of just `"M58(W) J1"` — the bare number
+alone doesn't convey that the closure reaches all the way to Switch
+Island. Unlike the service-station case above, this isn't scoped to the
+fallback-junction case specifically — the junction here *is* stated
+directly, it's just paired with a place name for the range's other end.
+
+**An out-of-range junction gets labeled with the road it actually
+belongs to.** M74 Southbound becomes M6 Southbound at J22/J45 in this
+project's own configured routes (both Axis and Omega). Traffic
+Scotland's raw text sometimes states a range extending past M74's own
+junctions — e.g. "M74 SB J22 - J45", where J45 doesn't exist as an M74
+junction at all (M74 tops out around J22 in this project's own
+configuration) — it's the M6's J45, on the other side of the merge point.
+`matching.label_junction_for_display()` checks whether a junction falls
+outside the *leg's own configured range* (`j_from`/`j_to`, already
+available in `rows_for_leg`) and, if so, prefixes it with a known
+continuing road's name: `"M74(S) J22 - M6 J45"` instead of the
+misleading `"M74(S) J22-J45"`.
+
+**This one is deliberately hardcoded and narrow, unlike everything else
+in this file.** Every other normalization in this project derives
+purely from the text itself; this one requires knowing that M74 doesn't
+have a J45 at all, which is real-world road topology knowledge that
+can't be derived from text alone — it has to come from somewhere, and
+the leg's own configured range is the only source of that knowledge
+already available here. `matching._KNOWN_ROAD_CONTINUATIONS` is a
+one-entry dict (`{"M74": "M6"}`) specific to this project's own routes.
+If the route configuration ever changes — a different road connecting
+to M74, or this M74→M6 sequence being removed — this mapping needs
+updating by hand; it will not automatically infer a different
+continuation from `routes.yaml`. Confirmed with tests that a normal
+same-road range (both junctions in range) is completely unaffected and
+still uses the plain no-space hyphen, and that M6 itself (the
+continuation *target*, not source) has no continuation configured and
+is left alone.
+
 ## M61/M6 merge exclusion (narrow, road-specific)
 
 National Highways describes an M61-origin closure reaching the M61/M6
