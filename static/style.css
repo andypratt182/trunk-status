@@ -87,10 +87,12 @@ button:focus-visible {
 
 /* --- Route cards on index --- */
 .route-grid {
+  width: 100%;
+  max-width: 1140px;
+  margin: 24px 0 0;
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 18px;
-  margin-top: 24px;
 }
 .route-card {
   background: var(--panel);
