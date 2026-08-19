@@ -68,8 +68,8 @@
             {% else %}—{% endif %}
           </td>
           <td data-label="Cause">{{ row.cause }}</td>
-          <td data-label="Start">{{ row.start }}</td>
-          <td data-label="End">{{ row.end }}</td>
+          <td class="datetime-cell" data-label="Start">{{ row.start }}</td>
+          <td class="datetime-cell" data-label="End">{{ row.end }}</td>
           <td class="more-info-cell" data-label="More Info">{% if row.comment and row.comment != row.location -%}
             <details>
               <summary>More Information</summary>
