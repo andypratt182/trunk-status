@@ -407,7 +407,7 @@ footer.site-footer {
 /* Desktop table: reserve enough space for the data-dense columns. */
 @media (min-width: 641px) {
   .wrap {
-    max-width: 1320px;
+    max-width: 1680px;
   }
 
   table.closures {
@@ -434,6 +434,10 @@ footer.site-footer {
   table.closures td:first-child {
     white-space: nowrap;
   }
+
+  .lanes-cell {
+     white-space: normal;
+   }
 }
 
 @media (max-width: 640px) {
