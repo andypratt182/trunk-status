@@ -46,7 +46,6 @@
           <th>Start</th>
           <th>End</th>
           <th>More Info</th>
-          <th>Source</th>
         </tr>
       </thead>
       <tbody>
@@ -70,13 +69,15 @@
           <td data-label="Cause">{{ row.cause }}</td>
           <td class="datetime-cell" data-label="Start">{{ row.start }}</td>
           <td class="datetime-cell" data-label="End">{{ row.end }}</td>
-          <td class="more-info-cell" data-label="More Info">{% if row.comment and row.comment != row.location -%}
+          <td class="more-info-cell" data-label="More Info">
             <details>
               <summary>More Information</summary>
+              {% if row.comment and row.comment != row.location %}
               <p>{{ row.comment }}</p>
+              {% endif %}
+              <p class="closure-source">Source: {{ row.source_label }}</p>
             </details>
-          {%- endif %}</td>
-          <td class="source-cell" data-label="Source">{{ row.source_label }}</td>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
