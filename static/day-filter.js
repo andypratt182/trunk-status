@@ -79,6 +79,26 @@
     return { start: days[idx].start, end: days[idx].end };
   }
 
+  // A closure with a definite, KNOWN end time that has already passed
+  // shouldn't show under ANY view, including "All" -- unlike the
+  // "hide under Today" logic inside overlapsDay() below (which only
+  // ever mattered for Today specifically, since every other day option
+  // is entirely in the future by construction), this applies
+  // universally: "All" is meant to mean "all CURRENT and UPCOMING
+  // disruptions", not literally every closure that has ever existed.
+  // Deliberately returns false (never "ended") for a BLANK or
+  // unparseable end time, rather than treating an unknown end as an
+  // ended one -- sources like Travel Alerts genuinely have no end time
+  // at all by design (the source itself never states one), and an
+  // entry with no known end could easily still be ongoing; hiding it
+  // just because we don't know when it ends would be wrong.
+  function hasDefinitivelyEnded(endAttr) {
+    if (!endAttr) return false;
+    const end = new Date(endAttr);
+    if (isNaN(end.getTime())) return false;
+    return end < new Date();
+  }
+
   function overlapsDay(startAttr, endAttr, dayStart, dayEnd) {
     if (!startAttr) return false;
     const start = new Date(startAttr);
@@ -93,9 +113,11 @@
     // by mid-morning it's simply over and no longer relevant to show
     // under a "what's happening today" view. This only ever affects
     // "Today" in practice, since every other day option is entirely in
-    // the future by construction and can't already have ended. "All" is
-    // untouched -- it's the explicit "show me everything" view and never
-    // calls this function (see resolveRange's dayStart === null check).
+    // the future by construction and can't already have ended. This is
+    // ALSO now applied to "All" separately, via hasDefinitivelyEnded()
+    // above at each call site -- kept here too rather than removed, so
+    // this function's own behavior for Today/specific-day selections is
+    // completely unchanged either way.
     if (end < new Date()) return false;
 
     return start < dayEnd && end >= dayStart;
@@ -194,8 +216,9 @@
       const rows = table.querySelectorAll("tbody tr");
       let visibleCount = 0;
       rows.forEach((row) => {
-        const show = dayStart === null || overlapsDay(
-          row.getAttribute("data-start"), row.getAttribute("data-end"), dayStart, dayEnd
+        const endAttr = row.getAttribute("data-end");
+        const show = !hasDefinitivelyEnded(endAttr) && (
+          dayStart === null || overlapsDay(row.getAttribute("data-start"), endAttr, dayStart, dayEnd)
         );
         row.hidden = !show;
         if (show) visibleCount++;
@@ -244,7 +267,7 @@
       let total = 0;
       let active = 0;
       entries.forEach((c) => {
-        const show = dayStart === null || overlapsDay(c.start, c.end, dayStart, dayEnd);
+        const show = !hasDefinitivelyEnded(c.end) && (dayStart === null || overlapsDay(c.start, c.end, dayStart, dayEnd));
         if (show) {
           total++;
           const effectiveStatus = c.source === TRAFFIC_SCOTLAND_SOURCE_LABEL
