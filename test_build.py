@@ -414,7 +414,68 @@ check(
     )[0]["location"] == "M74(S) J8-J10",
 )
 
-section("matching: rows_for_leg 'near JN' annotation for comment-derived junctions")
+section("matching: is_excluded_m6_m62_link_road (real reported case -- M6/M62 interchange 'link roads')")
+
+_real_m62_link_closure = {
+    "road_name": "M62", "direction": "Westbound",
+    "location_description": "M62 Westbound to M6 Southbound link road closure",
+    "comment": "Overall Scheme Details: M62 both directions Jct 9 to Jct 12 - carriageway "
+               "closure for horticulture (cutting and planting) on behalf of National Highways",
+    "cause_type": "advanceNoticeFullClosure", "lanes_operational": 0,
+    "start_datetime": "2026-08-17T21:00:00", "end_datetime": "2026-08-18T05:00:00",
+    "validity_status": "planned", "source_label": "Advance notice (full closure)",
+}
+check(
+    "real reported entry correctly detected as an excluded link road "
+    "(M62 West -> M6 South isn't part of Omega's own path through this interchange)",
+    matching.is_excluded_m6_m62_link_road(_real_m62_link_closure),
+)
+check(
+    "correctly excluded from the M62 Westbound leg end-to-end",
+    len(matching.rows_for_leg([_real_m62_link_closure], "M62", "Westbound", 8, 10)) == 0,
+)
+
+check(
+    "all 8 possible direction combinations at this interchange are classified correctly per "
+    "the full reported rule table -- only 1 of the 8 (M62 West -> M6 South) was independently "
+    "confirmed against real text; the other 7 are inferred to follow the same phrasing",
+    all(
+        (not matching.is_excluded_m6_m62_link_road({
+            "location_description": f"{from_road} {from_dir}bound to {to_road} {to_dir}bound link road closure",
+            "comment": "",
+        })) == should_include
+        for from_road, from_dir, to_road, to_dir, should_include in [
+            ("M6", "South", "M62", "West", True),
+            ("M6", "South", "M62", "East", False),
+            ("M6", "North", "M62", "East", False),
+            ("M6", "North", "M62", "West", False),
+            ("M62", "East", "M6", "North", True),
+            ("M62", "East", "M6", "South", False),
+            ("M62", "West", "M6", "North", False),
+            ("M62", "West", "M6", "South", False),  # matches the real confirmed example
+        ]
+    ),
+)
+
+check(
+    "ordinary M6/M62 closures with no link-road phrasing at all are completely unaffected",
+    len(matching.rows_for_leg(
+        [{"road_name": "M6", "direction": "northBound",
+          "location_description": "M6 northbound between J40 and J39", "comment": "",
+          "cause_type": "roadMaintenance", "lanes_restricted": 1, "lanes_operational": 2,
+          "start_datetime": "2026-08-26T20:00:00", "end_datetime": "2026-08-27T05:00:00",
+          "validity_status": "planned", "source_label": "Live API"}],
+        "M6", "northBound", 26, 45,
+    )) == 1,
+)
+check(
+    "the same 'link road' phrasing for a DIFFERENT interchange entirely (M56/M6) is NOT "
+    "excluded -- the regex matches 'M6'/'M62' literally, deliberately scoped to this one "
+    "interchange, not a general 'any link road' rule",
+    not matching.is_excluded_m6_m62_link_road({
+        "location_description": "M56 Eastbound to M6 Northbound link road closure", "comment": "",
+    }),
+)
 
 gretna_style = {
     "road_name": "M74", "direction": "Northbound",

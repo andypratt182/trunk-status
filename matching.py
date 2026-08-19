@@ -153,6 +153,63 @@ def is_m61_m6_merge_closure(closure: dict, road_name: str, data_direction: str) 
     return bool(_M61_MERGE_RE.search(haystack))
 
 
+# National Highways uses "link road" as their own term for the physical
+# slip roads directly connecting two motorways at a shared interchange --
+# here, the M6/M62 interchange (Croft Interchange, M6 ~J21 / M62 ~J10).
+# Real confirmed example (an EXCLUDED case): "M62 Westbound to M6
+# Southbound link road closure" in location_description. There are 8
+# possible direction combinations at this interchange (2 M6 directions x
+# 2 M62 directions, each as source or destination), but only 2
+# correspond to the actual path this project's own Omega route takes
+# through it: M6 South links to M62 West (the southbound leg continues
+# this way), and M62 East links to M6 North (the northbound leg comes
+# from this way). The other 6 combinations describe link roads serving a
+# completely different journey through the SAME interchange and have
+# nothing to do with Omega's own path, even though they mention both M6
+# and M62 by name and would otherwise match either leg. This is
+# necessarily an explicit allow-list, not a derived rule -- there's no
+# way to derive "does this link serve Omega's route" from the text
+# alone; it has to be stated explicitly, confirmed against one real
+# example, the same way the M74->M6 continuation elsewhere in this file
+# does. The other 7 combinations (including both allowed ones) are
+# untested against real text -- they're inferred to follow the same
+# phrasing convention as the one confirmed example, on the assumption
+# this is a templated/auto-generated description, not independently
+# confirmed for each one. The regex matches "M6"/"M62" literally rather
+# than a generic road pattern, since that alone guarantees this can
+# never fire for any other road pair -- no separate scope-check needed.
+_LINK_ROAD_RE = re.compile(
+    r'\b(M6|M62)\s+(North|South|East|West)(?:bound)?\s+to\s+'
+    r'(M6|M62)\s+(North|South|East|West)(?:bound)?\s+link\s+road\b',
+    re.IGNORECASE,
+)
+_ALLOWED_M6_M62_LINKS = {
+    ("M6", "south", "M62", "west"),
+    ("M62", "east", "M6", "north"),
+}
+
+
+def is_excluded_m6_m62_link_road(closure: dict) -> bool:
+    """True if this is a National Highways "link road" closure at the
+    M6/M62 interchange describing a from/to combination that isn't part
+    of this project's own configured routes -- see the comment on
+    _ALLOWED_M6_M62_LINKS for the exact two combinations that ARE kept.
+    Deliberately independent of which leg/direction is currently being
+    built (unlike is_m61_m6_merge_closure) -- the allow-list is a fixed,
+    universal rule about the closure's own stated from/to combination,
+    not something that varies by which leg happens to be asking, since
+    the same closure could otherwise match either the M6 leg or the M62
+    leg and should be excluded from both if it isn't one of the two
+    allowed combinations."""
+    haystack = f"{closure.get('location_description', '')} {closure.get('comment', '')}"
+    m = _LINK_ROAD_RE.search(haystack)
+    if not m:
+        return False
+    from_road, from_dir, to_road, to_dir = m.groups()
+    key = (from_road.upper(), from_dir.lower(), to_road.upper(), to_dir.lower())
+    return key not in _ALLOWED_M6_M62_LINKS
+
+
 def format_dt(iso_str: str) -> str:
     if not iso_str:
         return ""
@@ -436,6 +493,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         c for c in closures
         if closure_matches_leg(c, road_name, data_direction, j_from, j_to)
         and not is_m61_m6_merge_closure(c, road_name, data_direction)
+        and not is_excluded_m6_m62_link_road(c)
     ]
 
     # A single closure can have multiple matching location segments (e.g.

@@ -185,6 +185,52 @@ still uses the plain no-space hyphen, and that M6 itself (the
 continuation *target*, not source) has no continuation configured and
 is left alone.
 
+## M6/M62 interchange "link road" filtering (narrow, direction-specific)
+
+The Croft Interchange (M6 ~J21 / M62 ~J10) connects the M6 and M62 via
+several physical slip roads, which National Highways calls "link
+roads" — real confirmed text: "M62 Westbound to M6 Southbound link
+road closure". There are 8 possible direction combinations at this one
+interchange (2 M6 directions × 2 M62 directions, each as source or
+destination), but only 2 correspond to the actual path this project's
+Omega route takes through it: M6 South → M62 West (the southbound leg
+continues this way), and M62 East → M6 North (the northbound leg comes
+from this way). The other 6 describe link roads serving a completely
+different journey through the *same* interchange — genuine, real
+closures, just not relevant to Omega's route, even though they mention
+both M6 and M62 by name and would otherwise match either leg.
+
+`matching.is_excluded_m6_m62_link_road()` parses the "&lt;Road&gt;
+&lt;Direction&gt;bound to &lt;Road&gt; &lt;Direction&gt;bound link road"
+pattern and checks it against an explicit allow-list of exactly the two
+combinations Omega's route actually uses — necessarily an allow-list,
+not a derived rule, since there's no way to tell "does this link serve
+Omega's route" from the text alone. **Only 1 of the 8 combinations was
+independently confirmed against real text** (the excluded example
+above); the other 7 (including both allowed ones) are inferred to
+follow the same phrasing convention, on the assumption this is a
+templated/auto-generated description. The regex matches `M6`/`M62`
+literally rather than a generic road pattern, so it can never fire for
+a different interchange (e.g. M56/M6) even if that also happened to use
+"link road" phrasing — confirmed with a test. Applied independently of
+which leg/direction is currently being built (unlike the M61/M6 rule
+below), since the same closure could otherwise match either the M6 leg
+or the M62 leg and should be excluded from both if it isn't one of the
+two allowed combinations.
+
+**A real bug was caught and fixed while building this**, not in the
+logic itself but in how it got written: `_ALLOWED_M6_M62_LINKS` and
+`_LINK_ROAD_RE` were accidentally defined *twice* in the file, and
+because Python resolves module-level names at call time rather than at
+function-definition time, the second (differently-cased) definition was
+silently overriding the first — causing every lowercase key lookup to
+fail, misclassifying every combination as excluded. Caught by testing
+the full 8-combination table directly rather than just the one
+confirmed real example, which happened to still work by coincidence
+(both parts of the duplicate were internally self-consistent for that
+one case). Consolidated into a single definition of each; only one
+`_LINK_ROAD_RE` and one `_ALLOWED_M6_M62_LINKS` exist now.
+
 ## M61/M6 merge exclusion (narrow, road-specific)
 
 National Highways describes an M61-origin closure reaching the M61/M6
