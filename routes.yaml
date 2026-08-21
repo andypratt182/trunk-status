@@ -175,8 +175,11 @@ site:
     # (a single string) OR a YAML list of several such strings to use
     # different/custom regions instead of DEFAULT_BBOXES -- each must
     # individually stay under TomTom's 10,000km2 limit. Also optional:
-    # `category_filter: <int bitmask>` (default documented in
-    # sources/tomtom_incidents.py).
+    # `category_filter: "Accident,DangerousConditions,RoadClosed"` (a
+    # comma-separated string of TomTom category names/numbers -- default
+    # documented in sources/tomtom_incidents.py; NOT a bitmask despite an
+    # earlier version of this comment saying so -- TomTom rejected that
+    # live).
     - type: "tomtom_incidents"
       road_name: "M6"
     - type: "tomtom_incidents"

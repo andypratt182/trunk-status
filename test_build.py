@@ -1883,6 +1883,12 @@ check(
     "the default bbox param (None) resolves to DEFAULT_BBOXES, not a single box",
     isinstance(tti.DEFAULT_BBOXES, list) and len(tti.DEFAULT_BBOXES) == 3,
 )
+check(
+    "DEFAULT_CATEGORY_FILTER is a comma-separated string of TomTom's real "
+    "category names (confirmed from TomTom's own docs), not the OR'd bitmask "
+    "integer an earlier version of this module wrongly used and TomTom rejected live",
+    tti.DEFAULT_CATEGORY_FILTER == "Accident,DangerousConditions,RoadClosed",
+)
 
 section("tomtom_incidents: detect_direction")
 
