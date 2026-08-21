@@ -41,22 +41,33 @@ sources/travel_alerts.py and sources/scotland_incidents.py -- so
 adding more roads costs no extra requests, only adding a *new region*
 not already covered by an existing box would.
 
-categoryFilter is a bitmask limiting which incident categories TomTom
-returns. Only a handful of category values were confirmed against
-TomTom's own docs while building this (0=Unknown, 1=Accident, 2=Fog,
-4=Dangerous conditions, 8=Rain, 16=Ice, 32=Jam, 64=Lane closed,
-128=Road closed, 256=Road works) -- TomTom's docs mention further
-categories exist beyond this but the exact bit values for those weren't
-confirmed, so they're deliberately not included in DEFAULT_CATEGORY_FILTER.
-The default (Accident | Dangerous conditions | Road closed = 133)
-deliberately EXCLUDES Jam/Lane closed/Road works, since those overlap
-with what the existing closure sources already cover well and this
-source's whole purpose is filling the accidents/incidents gap
-specifically -- not becoming a second, redundant roadworks feed.
-Override via routes.yaml's category_filter if you want a different mix
-(see the module's fetch_from_tomtom_incidents() signature) -- consult
-TomTom's own Incident Details docs for the full, current bit values
-before adding categories beyond the ones confirmed above.
+categoryFilter is a **comma-separated list** of category values (numeric
+IDs or descriptive strings -- TomTom accepts either), NOT a bitmask --
+an earlier version of this module wrongly treated it as an OR'd bitmask
+integer based on an unreliable third-party doc mirror, which TomTom's
+API rejected live with HTTP 400 "Unsupported categoryFilter parameter
+value". The values below are taken directly from TomTom's own official
+Incident Details page (docs.tomtom.com), not a third-party mirror:
+`0`=Unknown, `1`=Accident, `2`=Fog, `3`=DangerousConditions, `4`=Rain,
+`5`=Ice, `6`=Jam, `7`=LaneClosed, `8`=RoadClosed, `9`=RoadWorks,
+`10`=Wind, `11`=Flooding, `14`=BrokenDownVehicle (12 and 13 aren't
+listed in TomTom's own table -- not a gap in this module, that's simply
+how TomTom's own enumeration skips them). If TomTom's docs change this
+list in the future, that's the first thing to re-check against a live
+400 error mentioning categoryFilter.
+
+The default (`Accident,DangerousConditions,RoadClosed`) deliberately
+EXCLUDES Jam/LaneClosed/RoadWorks, since those overlap with what the
+existing closure sources already cover well and this source's whole
+purpose is filling the accidents/incidents gap specifically -- not
+becoming a second, redundant roadworks feed. If categoryFilter is
+omitted entirely, TomTom itself defaults to including every category
+(`0,1,2,3,4,5,6,7,8,9,10,11,14`), which is why this module always sends
+an explicit value rather than relying on TomTom's own default. Override
+via routes.yaml's category_filter if you want a different mix (see the
+module's fetch_from_tomtom_incidents() signature) -- consult TomTom's
+own Incident Details docs page for the current, authoritative list
+before changing this.
 
 ## Known limitations
 
@@ -112,13 +123,13 @@ import urllib.request
 
 INCIDENT_DETAILS_URL = "https://api.tomtom.com/traffic/services/5/incidentDetails"
 
-# Confirmed subset of TomTom's categoryFilter bitmask (see module
-# docstring -- further categories exist per TomTom's own docs but their
-# bit values weren't confirmed while building this).
-CATEGORY_ACCIDENT = 1
-CATEGORY_DANGEROUS_CONDITIONS = 4
-CATEGORY_ROAD_CLOSED = 128
-DEFAULT_CATEGORY_FILTER = CATEGORY_ACCIDENT | CATEGORY_DANGEROUS_CONDITIONS | CATEGORY_ROAD_CLOSED  # 133
+# Confirmed (from TomTom's own official Incident Details docs page, not
+# a third-party mirror -- see module docstring) categoryFilter values.
+# categoryFilter itself is a comma-separated LIST, not a bitmask.
+CATEGORY_ACCIDENT = "Accident"
+CATEGORY_DANGEROUS_CONDITIONS = "DangerousConditions"
+CATEGORY_ROAD_CLOSED = "RoadClosed"
+DEFAULT_CATEGORY_FILTER = ",".join([CATEGORY_ACCIDENT, CATEGORY_DANGEROUS_CONDITIONS, CATEGORY_ROAD_CLOSED])
 
 # Three regional boxes covering the M74/M6/M57/M58/M62 corridor, each
 # kept comfortably under TomTom's confirmed 10,000km2-per-request limit
@@ -170,13 +181,13 @@ def detect_direction(text: str) -> str:
     return f"{m.group(1).capitalize()}bound"
 
 
-def fetch_page(bbox: str, category_filter: int, api_key: str) -> dict:
+def fetch_page(bbox: str, category_filter: str, api_key: str) -> dict:
     params = {
         "key": api_key,
         "bbox": bbox,
         "fields": FIELDS,
         "language": "en-GB",
-        "categoryFilter": str(category_filter),
+        "categoryFilter": category_filter,
         "timeValidityFilter": "present",
     }
     url = f"{INCIDENT_DETAILS_URL}?{urllib.parse.urlencode(params)}"
@@ -242,13 +253,13 @@ def normalize_incident(feature: dict, target_road: str) -> dict | None:
 
 # Cached per (bbox, category_filter) for the lifetime of the process (one
 # build run) -- so multiple road_name entries sharing the same bbox (the
-# normal case, since DEFAULT_BBOX already covers every road this project
-# tracks) fetch the area just once, same reasoning as
+# normal case, since DEFAULT_BBOXES already covers every road this project
+# tracks) fetch each box just once, same reasoning as
 # sources/travel_alerts.py's _page_cache.
-_response_cache: dict[tuple[str, int], dict | None] = {}
+_response_cache: dict[tuple[str, str], dict | None] = {}
 
 
-def fetch_incidents_in_bbox(bbox: str, category_filter: int, api_key: str) -> dict | None:
+def fetch_incidents_in_bbox(bbox: str, category_filter: str, api_key: str) -> dict | None:
     cache_key = (bbox, category_filter)
     if cache_key in _response_cache:
         return _response_cache[cache_key]
@@ -276,7 +287,7 @@ def fetch_from_tomtom_incidents(
     road_name: str,
     api_key: str | None = None,
     bbox: str | list[str] | None = None,
-    category_filter: int = DEFAULT_CATEGORY_FILTER,
+    category_filter: str = DEFAULT_CATEGORY_FILTER,
 ) -> list[dict]:
     """Fetch current TomTom traffic incidents across one or more bboxes
     (DEFAULT_BBOXES if bbox isn't given; a single string is also
