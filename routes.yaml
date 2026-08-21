@@ -150,6 +150,38 @@ site:
     - type: "national_highways_traffic_search"
       road_name: "M62"
 
+    # TomTom Traffic Incidents -- a genuinely separate, third-party live
+    # accidents/incidents feed (see sources/tomtom_incidents.py's module
+    # docstring for why this was added and its known limitations,
+    # especially: no reliable direction field, so an incident with no
+    # explicit direction in its own text shows on BOTH directions rather
+    # than being guessed or dropped). NOT auto-enabled by default -- add
+    # one entry per road you want covered, e.g.:
+    #   - type: "tomtom_incidents"
+    #     road_name: "M6"
+    # Requires a free API key from https://developer.tomtom.com/, set as
+    # a GitHub Actions secret named TOMTOM_API_KEY (see README) -- same
+    # pattern as NATIONAL_HIGHWAYS_API_KEY, but a missing key here only
+    # warns and skips this one source rather than failing the build,
+    # since this is an additional source, not the primary one.
+    # All roads sharing the default bounding box (every road already in
+    # this file does) are fetched in a SINGLE shared HTTP request, so
+    # adding more roads below costs nothing extra -- see
+    # fetch_incidents_in_bbox()'s caching in sources/tomtom_incidents.py.
+    # Optional per-entry overrides: `bbox: "minLon,minLat,maxLon,maxLat"`
+    # and `category_filter: <int bitmask>` (defaults documented in
+    # sources/tomtom_incidents.py).
+    # - type: "tomtom_incidents"
+    #   road_name: "M6"
+    # - type: "tomtom_incidents"
+    #   road_name: "M57"
+    # - type: "tomtom_incidents"
+    #   road_name: "M58"
+    # - type: "tomtom_incidents"
+    #   road_name: "M62"
+    # - type: "tomtom_incidents"
+    #   road_name: "M74"
+
 routes:
   - id: axis
     name: "Axis"

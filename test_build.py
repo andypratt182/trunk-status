@@ -24,6 +24,7 @@ import build
 from sources import national_highways as nh
 from sources import national_highways_traffic_search as nhts
 from sources import scotland_incidents as si
+from sources import tomtom_incidents as tti
 from sources import traffic_scotland as scot
 from sources import travel_alerts as ta
 from sources import xlsx_advance_notice as xlsx
@@ -1712,6 +1713,150 @@ check(
     "a mismatched road is excluded even if the (already server-filtered) API somehow returned one",
     len(_nhts_filtered) == 1 and _nhts_filtered[0]["road_name"] == "M6",
 )
+
+
+# =======================================================================
+# sources/tomtom_incidents.py
+# =======================================================================
+
+section("tomtom_incidents: normalize_incident (realistic sample payload)")
+
+_tti_feature_m6_no_direction = {
+    "type": "Feature",
+    "geometry": {"type": "Point", "coordinates": [-2.5, 53.4]},
+    "properties": {
+        "id": "abc123",
+        "iconCategory": 1,
+        "events": [{"description": "Accident", "code": 1}],
+        "startTime": "2026-08-20T14:05:11.123Z",
+        "endTime": None,
+        "from": "M6 J20",
+        "to": "M6 J21",
+        "roadNumbers": ["M6"],
+    },
+}
+_tti_feature_wrong_road = {
+    "type": "Feature",
+    "geometry": {"type": "Point", "coordinates": [-2.9, 53.6]},
+    "properties": {
+        "id": "def456",
+        "iconCategory": 1,
+        "events": [{"description": "Accident"}],
+        "startTime": "2026-08-20T14:10:00",
+        "endTime": None,
+        "from": "M62 J8",
+        "to": "M62 J9",
+        "roadNumbers": ["M62"],
+    },
+}
+_tti_feature_with_direction_no_id = {
+    "type": "Feature",
+    "geometry": {"type": "Point", "coordinates": [-2.55, 53.42]},
+    "properties": {
+        "iconCategory": 128,
+        "events": [{"description": "Road closed"}, {"description": "Road closed"}],
+        "startTime": "2026-08-20T15:00:00",
+        "endTime": "2026-08-20T18:00:00",
+        "from": "M6 southbound J19",
+        "to": "M6 J18",
+        "roadNumbers": ["M6"],
+    },
+}
+
+_r1 = tti.normalize_incident(_tti_feature_m6_no_direction, "M6")
+check("real M6 accident matched (roadNumbers contains M6)", _r1 is not None)
+check("record_id uses TomTom's real id when present", _r1["record_id"] == "tomtom-abc123")
+check("cause_type/comment is the event description", _r1["cause_type"] == "Accident" and _r1["comment"] == "Accident")
+check("location combines from/to", _r1["location_description"] == "M6 M6 J20 to M6 J21")
+check("start_datetime has sub-second precision stripped", _r1["start_datetime"] == "2026-08-20T14:05:11")
+check("end_datetime empty (honest, not guessed) when TomTom gives none", _r1["end_datetime"] == "")
+check(
+    "no explicit direction word anywhere in from/to/cause -> defaults to "
+    "'Both directions' rather than guessing (see module docstring)",
+    _r1["direction"] == "Both directions",
+)
+check("source_label correctly identifies this as TomTom", _r1["source_label"] == "TomTom Traffic Incident")
+
+check(
+    "a feature whose roadNumbers doesn't mention the target road is excluded",
+    tti.normalize_incident(_tti_feature_wrong_road, "M6") is None,
+)
+
+_r3 = tti.normalize_incident(_tti_feature_with_direction_no_id, "M6")
+check(
+    "explicit 'southbound' in the from text IS picked up (not defaulted to Both directions)",
+    _r3["direction"] == "Southbound",
+)
+check(
+    "missing TomTom id falls back to a coordinates+startTime derived id, not dropped",
+    _r3["record_id"].startswith("tomtom-") and "abc123" not in _r3["record_id"],
+)
+check(
+    "duplicate identical event descriptions are deduped, not repeated",
+    _r3["cause_type"] == "Road closed",
+)
+
+section("tomtom_incidents: junction matching works via shared matching.py logic")
+
+check(
+    "junctions extracted correctly from the combined from/to location text",
+    matching._junctions_in_text(_r1["location_description"]) == [20, 21],
+)
+_tti_rows_both = matching.rows_for_leg([_r1], "M6", "northBound", 19, 22)
+check(
+    "'Both directions' default correctly matches a leg regardless of its "
+    "own configured data_direction (northBound here)",
+    len(_tti_rows_both) == 1,
+)
+_tti_rows_south = matching.rows_for_leg([_r1], "M6", "southBound", 19, 22)
+check(
+    "...and also matches the southbound leg for the same road/range",
+    len(_tti_rows_south) == 1,
+)
+
+section("tomtom_incidents: fetch_from_tomtom_incidents (missing API key)")
+
+_tti_calls = []
+_original_tti_fetch_page = tti.fetch_page
+tti.fetch_page = lambda bbox, category_filter, api_key: _tti_calls.append(1) or {"incidents": []}
+tti._response_cache.clear()
+tti._warned_missing_key = False
+try:
+    _tti_no_key_result = tti.fetch_from_tomtom_incidents("M6", api_key="")
+finally:
+    tti.fetch_page = _original_tti_fetch_page
+
+check("missing API key returns an empty list rather than raising", _tti_no_key_result == [])
+check("missing API key never even attempts a fetch", _tti_calls == [])
+
+section("tomtom_incidents: shared bbox is fetched once across multiple roads (caching)")
+
+_tti_shared_payload = {"incidents": [_tti_feature_m6_no_direction, _tti_feature_wrong_road]}
+_tti_fetch_calls = []
+
+
+def _fake_tti_fetch_page(bbox, category_filter, api_key):
+    _tti_fetch_calls.append((bbox, category_filter))
+    return _tti_shared_payload
+
+
+tti.fetch_page = _fake_tti_fetch_page
+tti._response_cache.clear()
+try:
+    _tti_m6_results = tti.fetch_from_tomtom_incidents("M6", api_key="fake-key")
+    _tti_m62_results = tti.fetch_from_tomtom_incidents("M62", api_key="fake-key")
+finally:
+    tti.fetch_page = _original_tti_fetch_page
+
+check("the underlying HTTP fetch happened exactly once, not once per road", len(_tti_fetch_calls) == 1)
+check("M6 road_name correctly pulled only its own matching incident", len(_tti_m6_results) == 1)
+check("M62 road_name correctly pulled only its own matching incident", len(_tti_m62_results) == 1)
+
+section("tomtom_incidents: detect_direction")
+
+check("explicit direction word detected case-insensitively", tti.detect_direction("m6 EASTBOUND j5") == "Eastbound")
+check("no direction word anywhere defaults to 'Both directions'", tti.detect_direction("M6 J5 to J6") == "Both directions")
+check("empty text defaults to 'Both directions'", tti.detect_direction("") == "Both directions")
 
 
 # =======================================================================

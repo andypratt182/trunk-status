@@ -799,6 +799,40 @@ closure was published under.
   failure on any individual detail page is logged and skipped rather
   than failing the whole build.
 
+## TomTom Traffic Incidents (live accidents/incidents)
+
+Added to cover a real gap: National Highways' own "unplanned" closure
+data turned out not to carry genuinely incident-flavoured records (see
+`sources/national_highways.py`), and both Travel Alerts and the beta
+traffic-search endpoint are known to be thin — Travel Alerts by design
+(only 2-3 nationwide entries at a time), the beta endpoint because
+National Highways' own new incidents page is still in beta as of Aug
+2026. TomTom's feed is a genuinely separate, third-party data source
+(not a re-scrape of anything National Highways/Traffic Scotland already
+publish), free up to 2,500 requests/day, and DATEX-II-based like the
+main API this project already parses.
+
+**Kept fully separate, NOT auto-enabled** — see `sources/tomtom_incidents.py`'s
+module docstring for the full design and, most importantly, **known
+limitations**: TomTom's incident data has no reliable direction field,
+so an incident with no explicit direction word in its own text is shown
+on **both** directions rather than guessed or dropped; the default
+bounding box is a generous, unverified-against-a-live-map approximation
+of the M74/M6/M57/M58/M62 corridor; and this source could report the
+same physical accident that Travel Alerts or the beta endpoint also
+report, with no shared ID to dedupe against — a known limitation, not a
+guessed-at fix.
+
+To enable it: get a free API key at https://developer.tomtom.com/ (see
+"API & SDK Keys" in the dashboard), add it as a GitHub Actions secret
+named `TOMTOM_API_KEY` (or export it locally), then uncomment/add
+`tomtom_incidents` entries per road in `routes.yaml`'s
+`additional_sources` (commented-out examples are already there). Every
+road sharing the same bounding box — the normal case — is fetched in a
+single shared HTTP request, so adding more roads costs nothing extra. A
+missing key just warns and skips this one source; it never fails the
+build.
+
 ## Set up your routes
 
 Edit `routes.yaml`. Each route has a northbound and southbound direction,
