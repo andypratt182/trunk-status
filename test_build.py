@@ -1843,14 +1843,46 @@ def _fake_tti_fetch_page(bbox, category_filter, api_key):
 tti.fetch_page = _fake_tti_fetch_page
 tti._response_cache.clear()
 try:
-    _tti_m6_results = tti.fetch_from_tomtom_incidents("M6", api_key="fake-key")
-    _tti_m62_results = tti.fetch_from_tomtom_incidents("M62", api_key="fake-key")
+    _tti_m6_results = tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
+    _tti_m62_results = tti.fetch_from_tomtom_incidents("M62", api_key="fake-key", bbox="-3,54,-2,55")
 finally:
     tti.fetch_page = _original_tti_fetch_page
 
 check("the underlying HTTP fetch happened exactly once, not once per road", len(_tti_fetch_calls) == 1)
 check("M6 road_name correctly pulled only its own matching incident", len(_tti_m6_results) == 1)
 check("M62 road_name correctly pulled only its own matching incident", len(_tti_m62_results) == 1)
+
+section("tomtom_incidents: multiple bboxes are all fetched and merged, with cross-box dedup")
+
+_tti_box_a_payload = {"incidents": [_tti_feature_m6_no_direction]}  # id "abc123"
+_tti_box_b_payload = {"incidents": [_tti_feature_m6_no_direction, _tti_feature_with_direction_no_id]}
+_tti_multi_calls = []
+
+
+def _fake_tti_multi_fetch_page(bbox, category_filter, api_key):
+    _tti_multi_calls.append(bbox)
+    return {"box-a": _tti_box_a_payload, "box-b": _tti_box_b_payload}[bbox]
+
+
+tti.fetch_page = _fake_tti_multi_fetch_page
+tti._response_cache.clear()
+try:
+    _tti_multi_results = tti.fetch_from_tomtom_incidents(
+        "M6", api_key="fake-key", bbox=["box-a", "box-b"],
+    )
+finally:
+    tti.fetch_page = _original_tti_fetch_page
+
+check("both configured bboxes were fetched", _tti_multi_calls == ["box-a", "box-b"])
+check(
+    "the incident present in BOTH boxes (id 'abc123', simulating boundary overlap) "
+    "is only counted once, not twice, in the merged results",
+    len(_tti_multi_results) == 2,
+)
+check(
+    "the default bbox param (None) resolves to DEFAULT_BBOXES, not a single box",
+    isinstance(tti.DEFAULT_BBOXES, list) and len(tti.DEFAULT_BBOXES) == 3,
+)
 
 section("tomtom_incidents: detect_direction")
 

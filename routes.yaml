@@ -164,12 +164,18 @@ site:
     # pattern as NATIONAL_HIGHWAYS_API_KEY, but a missing key here only
     # warns and skips this one source rather than failing the build,
     # since this is an additional source, not the primary one.
-    # All roads sharing the default bounding box (every road already in
-    # this file does) are fetched in a SINGLE shared HTTP request, so
-    # adding more roads below costs nothing extra -- see
-    # fetch_incidents_in_bbox()'s caching in sources/tomtom_incidents.py.
+    # Every road below shares the same 3 default regional bboxes (see
+    # DEFAULT_BBOXES in sources/tomtom_incidents.py), each fetched ONCE
+    # and cached regardless of how many roads reference it -- adding
+    # more roads below costs nothing extra. These boxes are split up
+    # because TomTom enforces a 10,000km2-per-request area limit
+    # (confirmed live -- one big box covering the whole corridor was
+    # rejected with HTTP 400).
     # Optional per-entry overrides: `bbox: "minLon,minLat,maxLon,maxLat"`
-    # and `category_filter: <int bitmask>` (defaults documented in
+    # (a single string) OR a YAML list of several such strings to use
+    # different/custom regions instead of DEFAULT_BBOXES -- each must
+    # individually stay under TomTom's 10,000km2 limit. Also optional:
+    # `category_filter: <int bitmask>` (default documented in
     # sources/tomtom_incidents.py).
     - type: "tomtom_incidents"
       road_name: "M6"
