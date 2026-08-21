@@ -36,6 +36,10 @@ jobs:
         run: python build.py
         env:
           NATIONAL_HIGHWAYS_API_KEY: ${{ secrets.NATIONAL_HIGHWAYS_API_KEY }}
+          # Optional -- only used if you've added tomtom_incidents entries
+          # to routes.yaml's additional_sources (see README). Safe to leave
+          # unset otherwise: that source just warns and skips itself.
+          TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
