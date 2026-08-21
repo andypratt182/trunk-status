@@ -27,15 +27,19 @@ existing sources, since neither has a stable ID to dedupe against.
 
 ## Request shape
 
-One request per build, with a single bounding box covering the whole
-route network (Central Scotland down to NW England) -- NOT one request
-per road, unlike sources/national_highways_traffic_search.py. TomTom's
-bbox query returns every incident in the box in one response; each
-configured road_name is then filtered from that single cached response,
-same caching pattern as sources/travel_alerts.py and
-sources/scotland_incidents.py (fetch the shared listing/area once,
-filter per road afterwards) -- so adding more roads costs no extra
-requests, same reasoning as those two.
+One request **per bounding box** per build — NOT one request per road,
+unlike sources/national_highways_traffic_search.py. TomTom enforces a
+hard 10,000km² limit per bbox (confirmed live: a single box spanning
+the whole Central-Scotland-to-Manchester corridor was rejected with
+HTTP 400 "Area of 'bbox' parameter is larger than 10,000km2" during
+initial testing) -- so DEFAULT_BBOXES below is a small set of narrower
+regional boxes covering the corridor between them, each comfortably
+under that limit with margin, not one box for everything. Each
+configured road_name is filtered from the merged, deduped results of
+every box, same caching-then-filtering pattern as
+sources/travel_alerts.py and sources/scotland_incidents.py -- so
+adding more roads costs no extra requests, only adding a *new region*
+not already covered by an existing box would.
 
 categoryFilter is a bitmask limiting which incident categories TomTom
 returns. Only a handful of category values were confirmed against
@@ -69,13 +73,18 @@ before adding categories beyond the ones confirmed above.
   southbound page is a far smaller cost than silently guessing the
   wrong direction (which could tell someone their direction is clear
   when it isn't) or silently dropping it entirely.
-- **DEFAULT_BBOX is approximate, not verified against a live map.** It's
-  a generous box intended to cover the M74/M6/M57/M58/M62 corridor this
-  project's routes.yaml already uses, padded to be safe rather than
-  tight. Tighten it (or override per-call) once you've confirmed real
-  incidents are being returned/filtered correctly -- same "verify
-  against live data" caveat every scraper in this project already
-  carries for its own reason.
+- **DEFAULT_BBOXES are approximate, not verified against a live map --**
+  only their AREA (staying under TomTom's confirmed 10,000km² limit,
+  with real margin) has been checked, via plain trigonometric estimate,
+  not their actual geographic coverage of every junction this project's
+  routes.yaml tracks. Tighten/reshape them (or override per-call) once
+  you've confirmed real incidents near your actual junctions are being
+  returned -- same "verify against live data" caveat every scraper in
+  this project already carries for its own reason. The three default
+  boxes are meant to sit edge-to-edge/slightly overlapping along the
+  M74->M6->M57/M58/M62 corridor; overlap between adjacent boxes is
+  handled by deduping on each incident's own record_id, so an incident
+  returned by two boxes near a shared edge is only counted once.
 - **Possible overlap with existing sources, not yet resolved.** TomTom
   could report the same physical accident that National Highways'
   Travel Alerts or the beta traffic-search endpoint also reports, with
@@ -87,9 +96,11 @@ before adding categories beyond the ones confirmed above.
   published request/response documentation, not a real fetched payload
   (no network access while writing this) -- unlike some of this
   project's other sources, which had at least one real payload to check
-  field names against. If a live run logs "0 incidents in bbox" or
-  errors on a field access, check the real response shape against this
-  module's assumptions before assuming the source itself is broken.
+  field names against. The 10,000km² bbox limit above IS confirmed live
+  (from a real build's error log), but the actual incident-shaped JSON
+  response body still isn't. If a live run logs "0 incidents in bbox"
+  or errors on a field access, check the real response shape against
+  this module's assumptions before assuming the source itself is broken.
 """
 from __future__ import annotations
 
@@ -109,10 +120,21 @@ CATEGORY_DANGEROUS_CONDITIONS = 4
 CATEGORY_ROAD_CLOSED = 128
 DEFAULT_CATEGORY_FILTER = CATEGORY_ACCIDENT | CATEGORY_DANGEROUS_CONDITIONS | CATEGORY_ROAD_CLOSED  # 133
 
-# Generous box covering the M74 (Glasgow) down through the M6/M57/M58/M62
-# corridor (NW England) -- see module docstring's "Known limitations".
+# Three regional boxes covering the M74/M6/M57/M58/M62 corridor, each
+# kept comfortably under TomTom's confirmed 10,000km2-per-request limit
+# (a single box spanning the whole corridor measured roughly 5x that
+# limit and was rejected live -- see module docstring). Adjacent boxes
+# overlap slightly rather than leaving a gap; the small resulting
+# double-fetch near each shared edge is deduped by record_id in
+# fetch_from_tomtom_incidents(). Areas below are plain trigonometric
+# estimates (degrees -> km at each box's latitude), not authoritative --
+# see "Known limitations" above.
 # minLon,minLat,maxLon,maxLat
-DEFAULT_BBOX = "-4.6,53.15,-2.0,55.95"
+DEFAULT_BBOXES = [
+    "-4.1,54.95,-3.0,55.85",   # Scotland: M74 J8-22 corridor (~6,900km2)
+    "-3.2,54.0,-2.4,55.0",     # Cumbria/Lancashire: M6 J45 down to ~J30 (~5,700km2)
+    "-3.2,53.3,-2.1,54.05",    # Gtr Manchester/Merseyside: M6 J30-21, M57, M58, M62 (~6,000km2)
+]
 
 FIELDS = (
     "{incidents{type,geometry{type,coordinates},"
@@ -253,14 +275,18 @@ _warned_missing_key = False
 def fetch_from_tomtom_incidents(
     road_name: str,
     api_key: str | None = None,
-    bbox: str = DEFAULT_BBOX,
+    bbox: str | list[str] | None = None,
     category_filter: int = DEFAULT_CATEGORY_FILTER,
 ) -> list[dict]:
-    """Fetch current TomTom traffic incidents in bbox (shared/cached
-    across every road_name using the same bbox) and filter to ones whose
-    own roadNumbers list mentions road_name. Returns closures in the
-    standard flat record shape -- see module docstring for the direction
-    caveat and known limitations."""
+    """Fetch current TomTom traffic incidents across one or more bboxes
+    (DEFAULT_BBOXES if bbox isn't given; a single string is also
+    accepted for a one-off override) and filter to ones whose own
+    roadNumbers list mentions road_name. Each bbox is fetched/cached
+    independently (see fetch_incidents_in_bbox), and results are deduped
+    by record_id across boxes in case adjacent boxes' overlap returns
+    the same incident twice. Returns closures in the standard flat
+    record shape -- see module docstring for the direction caveat and
+    known limitations."""
     global _warned_missing_key
     if not api_key:
         if not _warned_missing_key:
@@ -272,18 +298,31 @@ def fetch_from_tomtom_incidents(
             _warned_missing_key = True
         return []
 
-    payload = fetch_incidents_in_bbox(bbox, category_filter, api_key)
-    if payload is None:
-        return []
+    if bbox is None:
+        bboxes = DEFAULT_BBOXES
+    elif isinstance(bbox, str):
+        bboxes = [bbox]
+    else:
+        bboxes = bbox
 
-    features = payload.get("incidents", [])
-    print(f"  {len(features)} total incident(s) in bbox (all roads)")
+    seen_ids: set[str] = set()
+    results: list[dict] = []
+    for one_bbox in bboxes:
+        payload = fetch_incidents_in_bbox(one_bbox, category_filter, api_key)
+        if payload is None:
+            continue  # this box's fetch failed -- already warned, keep going with the rest
 
-    results = []
-    for feature in features:
-        record = normalize_incident(feature, road_name)
-        if record is not None:
+        features = payload.get("incidents", [])
+        print(f"  {len(features)} total incident(s) in bbox {one_bbox} (all roads)")
+
+        for feature in features:
+            record = normalize_incident(feature, road_name)
+            if record is None:
+                continue
+            if record["record_id"] in seen_ids:
+                continue  # returned by more than one box's overlap -- count once
+            seen_ids.add(record["record_id"])
             results.append(record)
 
-    print(f"  {len(results)} match {road_name}")
+    print(f"  {len(results)} match {road_name} across {len(bboxes)} bbox(es)")
     return results
