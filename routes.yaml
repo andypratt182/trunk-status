@@ -171,16 +171,16 @@ site:
     # Optional per-entry overrides: `bbox: "minLon,minLat,maxLon,maxLat"`
     # and `category_filter: <int bitmask>` (defaults documented in
     # sources/tomtom_incidents.py).
-     - type: "tomtom_incidents"
-       road_name: "M6"
-     - type: "tomtom_incidents"
-       road_name: "M57"
-     - type: "tomtom_incidents"
-       road_name: "M58"
-     - type: "tomtom_incidents"
-       road_name: "M62"
-     - type: "tomtom_incidents"
-       road_name: "M74"
+    - type: "tomtom_incidents"
+      road_name: "M6"
+    - type: "tomtom_incidents"
+      road_name: "M57"
+    - type: "tomtom_incidents"
+      road_name: "M58"
+    - type: "tomtom_incidents"
+      road_name: "M62"
+    - type: "tomtom_incidents"
+      road_name: "M74"
 
 routes:
   - id: axis
