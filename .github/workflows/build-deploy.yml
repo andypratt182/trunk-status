@@ -20,6 +20,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # TEMPORARY: contents: write overrides the top-level `contents: read`
+    # default (deploy below still gets the read-only default, unaffected)
+    # ONLY so the "Commit investigation log" step below can push. See
+    # investigation_log.py's module docstring -- revert this override
+    # (delete these two lines) once that investigation is done and that
+    # step is removed.
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,6 +48,30 @@ jobs:
           # to routes.yaml's additional_sources (see README). Safe to leave
           # unset otherwise: that source just warns and skips itself.
           TOMTOM_API_KEY: ${{ secrets.TOMTOM_API_KEY }}
+
+      # TEMPORARY -- see investigation_log.py's module docstring for what
+      # this is and when to remove it (this step, the permissions
+      # override above, investigation_log.py itself, and its call in
+      # build.py's main()). Most runs have nothing new to commit (the
+      # tracked sources are usually quiet -- that's expected), so this
+      # step is a no-op almost every time it runs. "[skip ci]" in the
+      # commit message is load-bearing: without it, this push would
+      # itself satisfy the `push: branches: [main]` trigger above and
+      # re-run this whole workflow, which could commit again and trigger
+      # again -- GitHub's Actions runner recognizes that marker and skips
+      # starting a new run for a commit that contains it.
+      - name: Commit investigation log (temporary -- see investigation_log.py)
+        run: |
+          if [ -n "$(git status --porcelain investigation-log/)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add investigation-log/
+            git commit -m "Update investigation log [skip ci]"
+            git pull --rebase
+            git push
+          else
+            echo "No new investigation log entries this build."
+          fi
 
       - name: Upload pages artifact
         uses: actions/upload-pages-artifact@v3
