@@ -51,6 +51,11 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from matching import _junctions_in_text
+# Imported under an alias -- this module already uses "status" as a
+# local variable name throughout (for validity_status: "active"/
+# "planned"), so importing the shared status-registry module under its
+# own name would shadow that everywhere below.
+from sources import status as source_status
 
 ROADWORKS_URL = "https://www.traffic.gov.scot/traffic-information/roadworks"
 PLANNED_ROADWORKS_URL = "https://www.traffic.gov.scot/traffic-information/planned-roadworks"
@@ -678,6 +683,7 @@ def compute_validity_status(start_iso: str, end_iso: str, now: datetime, fallbac
 
 def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
     aliases = ROAD_ALIASES.get(road_name, {road_name})
+    label = f"Traffic Scotland Roadworks -- {road_name}"
     pages = [
         (ROADWORKS_URL, "active"),
         (PLANNED_ROADWORKS_URL, "planned"),
@@ -686,6 +692,7 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
     # href -> (listing_location_text, validity_status) -- de-duplicated
     # across both listing pages in case an entry somehow appears on both
     found: dict[str, tuple[str, str]] = {}
+    any_listing_page_fetched_ok = False
     for url, status in pages:
         print(f"Fetching {url} ...")
         try:
@@ -694,6 +701,7 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
             print(f"Warning: HTTP {e.code} {e.reason} fetching {url} -- skipping this page.")
             continue
 
+        any_listing_page_fetched_ok = True
         entries = find_road_entries(html, aliases)
         print(f"  found {len(entries)} {road_name}-matching entr"
               f"{'y' if len(entries) == 1 else 'ies'} on this page")
@@ -701,9 +709,16 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
             found.setdefault(entry["href"], (entry["location_text"], status))
 
     if not found:
-        print("Warning: 0 matching entries found from Traffic Scotland. If "
-              "this is unexpected, the listing page's real block/link "
-              "structure may differ from what find_road_entries() expects.")
+        if not any_listing_page_fetched_ok:
+            # Both listing pages failed to even fetch -- a genuine
+            # failure, not "0 matching entries" (see the else branch,
+            # which is the pre-existing normal/quiet-day case).
+            source_status.record_status(label, ok=False, error="both Traffic Scotland listing pages failed to fetch")
+        else:
+            print("Warning: 0 matching entries found from Traffic Scotland. If "
+                  "this is unexpected, the listing page's real block/link "
+                  "structure may differ from what find_road_entries() expects.")
+            source_status.record_status(label, ok=True, count=0)
         return []
 
     print(f"Fetching detail pages for {len(found)} matched entr"
@@ -782,4 +797,5 @@ def fetch_from_traffic_scotland(road_name: str = "M74") -> list[dict]:
         print(f"  {fetch_failures} detail page fetch(es) failed and were skipped")
 
     print(f"Parsed {len(results)} {road_name} closures from Traffic Scotland detail pages")
+    source_status.record_status(label, ok=True, count=len(results))
     return results

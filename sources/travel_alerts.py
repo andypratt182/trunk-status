@@ -48,6 +48,8 @@ import re
 import urllib.error
 import urllib.request
 
+from sources import status
+
 TRAVEL_ALERTS_URL = "https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/travel-alerts/"
 BASE_URL = "https://nationalhighways.co.uk"
 
@@ -189,8 +191,14 @@ def fetch_from_travel_alerts(road_name: str) -> list[dict]:
     with no start/end time (see module docstring) and validity_status
     always "active" (an alert only appears on this page while it's
     ongoing; National Highways removes it once resolved)."""
+    label = f"Travel Alerts -- {road_name}"
     html = fetch_listing_page()
     if html is None:
+        # fetch_listing_page() already printed exactly why -- this is
+        # the earliest point fetch_from_travel_alerts() itself knows the
+        # underlying fetch failed, whether or not this is the road that
+        # triggered the (shared, cached) fetch in the first place.
+        status.record_status(label, ok=False, error="failed to fetch the Travel Alerts listing page")
         return []
 
     cards = parse_alert_cards(html)
@@ -230,4 +238,5 @@ def fetch_from_travel_alerts(road_name: str) -> list[dict]:
         print(f"  (this is normal -- Travel Alerts typically has only 2-3 entries "
               f"covering the whole English network at any moment)")
 
+    status.record_status(label, ok=True, count=len(results))
     return results

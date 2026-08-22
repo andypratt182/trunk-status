@@ -22,6 +22,8 @@ import urllib.request
 from datetime import date as date_cls
 from datetime import datetime
 
+from sources import status
+
 XLSX_HEADER_SYNONYMS: dict[str, set[str]] = {
     "road_name": {"road", "roadname", "route", "roadnumber"},
     "direction": {"direction"},
@@ -110,6 +112,7 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
     except ImportError:
         print("Warning: openpyxl is not installed -- skipping the XLSX "
               "advance-notice source (add it to requirements.txt).")
+        status.record_status("Advance Notice (XLSX)", ok=False, error="openpyxl not installed")
         return []
 
     print(f"Fetching {url} ...")
@@ -119,12 +122,14 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         print(f"Warning: XLSX fetch failed with HTTP {e.code} {e.reason} -- skipping this source.")
+        status.record_status("Advance Notice (XLSX)", ok=False, error=f"HTTP {e.code} {e.reason}")
         return []
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     except Exception as e:  # noqa: BLE001 -- best-effort source, never fatal
         print(f"Warning: could not open the XLSX file ({e}) -- skipping this source.")
+        status.record_status("Advance Notice (XLSX)", ok=False, error=f"could not open file: {e}")
         return []
 
     closures: list[dict] = []
@@ -175,4 +180,5 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
         print(f"  sheet '{sheet_name}': parsed {sheet_rows} closure rows")
 
     print(f"Parsed {len(closures)} total rows from the XLSX advance-notice report")
+    status.record_status("Advance Notice (XLSX)", ok=True, count=len(closures))
     return closures

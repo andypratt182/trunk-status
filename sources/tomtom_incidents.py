@@ -121,6 +121,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from sources import status
+
 INCIDENT_DETAILS_URL = "https://api.tomtom.com/traffic/services/5/incidentDetails"
 
 # Confirmed (from TomTom's own official Incident Details docs page, not
@@ -299,6 +301,7 @@ def fetch_from_tomtom_incidents(
     record shape -- see module docstring for the direction caveat and
     known limitations."""
     global _warned_missing_key
+    label = f"TomTom Incidents -- {road_name}"
     if not api_key:
         if not _warned_missing_key:
             print("Warning: TOMTOM_API_KEY is not set -- skipping the TomTom "
@@ -307,6 +310,10 @@ def fetch_from_tomtom_incidents(
                   "Actions secret (or export it locally), same as "
                   "NATIONAL_HIGHWAYS_API_KEY.")
             _warned_missing_key = True
+        # Treated as a failure (red), not "0 results" (amber): this
+        # means the source never even attempted to run this build, which
+        # is worth flagging distinctly from "ran fine, found nothing".
+        status.record_status(label, ok=False, error="TOMTOM_API_KEY not set")
         return []
 
     if bbox is None:
@@ -318,9 +325,11 @@ def fetch_from_tomtom_incidents(
 
     seen_ids: set[str] = set()
     results: list[dict] = []
+    failed_boxes: list[str] = []
     for one_bbox in bboxes:
         payload = fetch_incidents_in_bbox(one_bbox, category_filter, api_key)
         if payload is None:
+            failed_boxes.append(one_bbox)
             continue  # this box's fetch failed -- already warned, keep going with the rest
 
         features = payload.get("incidents", [])
@@ -336,4 +345,15 @@ def fetch_from_tomtom_incidents(
             results.append(record)
 
     print(f"  {len(results)} match {road_name} across {len(bboxes)} bbox(es)")
+    if failed_boxes:
+        # At least one box's fetch failed -- red, even though the boxes
+        # that DID succeed may still have produced usable results above.
+        # Erring toward "flag it" rather than silently accepting partial
+        # coverage as if nothing were wrong.
+        status.record_status(
+            label, ok=False,
+            error=f"{len(failed_boxes)}/{len(bboxes)} bbox fetch(es) failed",
+        )
+    else:
+        status.record_status(label, ok=True, count=len(results))
     return results

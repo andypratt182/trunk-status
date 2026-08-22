@@ -17,8 +17,28 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from matching import format_dt
+from sources import status
 
 NATIONAL_HIGHWAYS_DEFAULT_BASE_URL = "https://api.data.nationalhighways.co.uk"
+
+
+class PrimarySourceError(Exception):
+    """Raised internally within this module for a genuine fetch/auth
+    failure -- never escapes fetch_from_national_highways_api() or
+    fetch_from_flat_mirror() themselves, both of which catch this (or
+    let it signal a partial per-closureType failure -- see
+    fetch_from_national_highways_api()'s docstring) and report it via
+    sources/status.py instead, the same best-effort pattern every
+    additional source in this project already follows. Previously this
+    module used `raise SystemExit(...)` here instead, which crashed the
+    whole build outright on any primary-source failure -- deliberately
+    changed so a broken primary source no longer means "no site update
+    at all", now that the additional sources can still provide useful
+    information on their own (see build.py's main() for the prominent,
+    page-level warning banner this triggers instead, since silently
+    publishing a much sparser page without it could read as "the road
+    is clear" when the real reason is just that the main data source
+    broke -- a materially different, worth-flagging-loudly situation)."""
 
 
 def fetch_json(url: str, headers: dict | None = None) -> tuple[dict, dict]:
@@ -33,7 +53,7 @@ def fetch_json(url: str, headers: dict | None = None) -> tuple[dict, dict]:
             return payload, dict(resp.headers)
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
-        raise SystemExit(
+        raise PrimarySourceError(
             f"HTTP {e.code} {e.reason} calling:\n  {url}\n\n"
             f"Response body from the API:\n{body}\n"
         ) from None
@@ -152,16 +172,17 @@ def normalize_datex_response(payload: dict) -> list[dict]:
 
 
 def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
+    label = "Primary Source (National Highways Live API)"
     api_key = os.environ.get("NATIONAL_HIGHWAYS_API_KEY", "").strip()
     if not api_key:
-        raise SystemExit(
-            "NATIONAL_HIGHWAYS_API_KEY is not set.\n"
-            "  - In GitHub Actions: add it as a repo secret "
-            "(Settings -> Secrets and variables -> Actions) and pass it to\n"
-            "    the build step's `env:` block -- see the README.\n"
-            "  - Locally: export NATIONAL_HIGHWAYS_API_KEY=your-key-here "
-            "before running build.py."
-        )
+        print("Warning: NATIONAL_HIGHWAYS_API_KEY is not set.\n"
+              "  - In GitHub Actions: add it as a repo secret "
+              "(Settings -> Secrets and variables -> Actions) and pass it to\n"
+              "    the build step's `env:` block -- see the README.\n"
+              "  - Locally: export NATIONAL_HIGHWAYS_API_KEY=your-key-here "
+              "before running build.py.")
+        status.record_status(label, ok=False, error="NATIONAL_HIGHWAYS_API_KEY not set")
+        return []
 
     base_url = site_cfg.get("api_base_url", NATIONAL_HIGHWAYS_DEFAULT_BASE_URL)
     closure_type_cfg = site_cfg.get("closure_type")  # "planned" / "unplanned" / None (both)
@@ -195,6 +216,7 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
     closure_types_to_fetch = [closure_type_cfg] if closure_type_cfg else ["planned", "unplanned"]
 
     closures: list[dict] = []
+    failed_closure_types: list[str] = []
     for closure_type in closure_types_to_fetch:
         params = [f"startDateTime={start}", f"endDateTime={end}", f"closureType={closure_type}"]
         url = f"{base_url.rstrip('/')}/roads/v2.0/closures?{'&'.join(params)}"
@@ -202,19 +224,36 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
         page_num = 1
         max_pages = 50  # safety cap so a pagination bug can't loop forever
         type_closures: list[dict] = []
-        while url and page_num <= max_pages:
-            print(f"Fetching {url} ...")
-            payload, response_headers = fetch_json(url, headers=headers)
-            page_closures = normalize_datex_response(payload)
-            type_closures.extend(page_closures)
-            print(f"  page {page_num}: {len(page_closures)} closure-location records")
+        try:
+            while url and page_num <= max_pages:
+                print(f"Fetching {url} ...")
+                payload, response_headers = fetch_json(url, headers=headers)
+                page_closures = normalize_datex_response(payload)
+                type_closures.extend(page_closures)
+                print(f"  page {page_num}: {len(page_closures)} closure-location records")
 
-            next_url = find_next_page_url(payload, response_headers)
-            if next_url and next_url != url:
-                url = next_url
-                page_num += 1
-            else:
-                url = None
+                next_url = find_next_page_url(payload, response_headers)
+                if next_url and next_url != url:
+                    url = next_url
+                    page_num += 1
+                else:
+                    url = None
+        except Exception as e:  # noqa: BLE001 -- best-effort source now, same pattern as
+                                 # every other source in this project; not just
+                                 # PrimarySourceError, since a raw network timeout or
+                                 # JSON decode error should be caught here too, not
+                                 # left to crash the build the way the old
+                                 # `raise SystemExit` behavior did.
+            # A genuine fetch failure partway through THIS closureType --
+            # keep whatever closures this closureType already gathered
+            # across earlier pages (better than discarding good partial
+            # data), but flag the closureType as failed so the overall
+            # source status is honestly 'failed', not silently 'ok' with
+            # an incomplete count. Other closureType requests still run
+            # (see the enclosing for-loop) -- one bad request shouldn't
+            # take out the other, still-working one.
+            print(f"Warning: {e} -- closureType={closure_type} may be incomplete.")
+            failed_closure_types.append(closure_type)
 
         if page_num > 1:
             print(f"  closureType={closure_type}: followed {page_num} page(s), "
@@ -258,16 +297,35 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
         print("Warning: 0 records parsed. If this is unexpected, the API's "
               "response shape may differ from what this script expects -- "
               "check the raw payload keys.")
+
+    if failed_closure_types:
+        status.record_status(
+            label, ok=False,
+            error=f"{len(failed_closure_types)}/{len(closure_types_to_fetch)} "
+                  f"closureType request(s) failed ({', '.join(failed_closure_types)})",
+        )
+    else:
+        status.record_status(label, ok=True, count=len(closures))
     return closures
 
 
 def fetch_from_flat_mirror(site_cfg: dict) -> tuple[list[dict], str]:
+    label = "Primary Source (Flat JSON Mirror)"
     url = site_cfg["data_url"]
     print(f"Fetching {url} ...")
-    data, _headers = fetch_json(url, headers={"User-Agent": "route-closures-build/1.0"})
+    try:
+        data, _headers = fetch_json(url, headers={"User-Agent": "route-closures-build/1.0"})
+    except Exception as e:  # noqa: BLE001 -- best-effort source now, same pattern as
+                             # every other source in this project.
+        print(f"Warning: {e} -- continuing with 0 closures from the primary source. "
+              f"Other configured sources (if any) are still included.")
+        status.record_status(label, ok=False, error=str(e).splitlines()[0])
+        return [], ""
+
     closures = data["closures"]
     for c in closures:
         c.setdefault("record_id", c.get("idG") or c.get("id"))
     print(f"Loaded {len(closures)} closure records (feed updated {data.get('updated')})")
     feed_updated = format_dt(data.get("updated", ""))
+    status.record_status(label, ok=True, count=len(closures))
     return closures, feed_updated

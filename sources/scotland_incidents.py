@@ -55,6 +55,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 
+from sources import status
+
 INCIDENTS_URL = "https://www.traffic.gov.scot/traffic-information/incidents"
 BASE_URL = "https://www.traffic.gov.scot"
 
@@ -270,9 +272,11 @@ def fetch_from_scotland_incidents(road_name: str = "M74") -> list[dict]:
     closures in the standard flat record shape -- with no end time (see
     module docstring) and validity_status always "active"."""
     aliases = ROAD_ALIASES.get(road_name, {road_name})
+    label = f"Traffic Scotland Incidents -- {road_name}"
 
     html = fetch_listing_page()
     if html is None:
+        status.record_status(label, ok=False, error="failed to fetch the Traffic Scotland incidents page")
         return []
 
     cards = parse_incident_cards(html)
@@ -315,4 +319,5 @@ def fetch_from_scotland_incidents(road_name: str = "M74") -> list[dict]:
         })
 
     print(f"  {len(results)} match {road_name} (aliases: {', '.join(sorted(aliases))})")
+    status.record_status(label, ok=True, count=len(results))
     return results

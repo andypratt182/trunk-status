@@ -39,6 +39,8 @@ import re
 import urllib.error
 import urllib.request
 
+from sources import status
+
 TRAFFIC_SEARCH_BASE_URL = "https://nationalhighways.co.uk/trafficsearchapi/events"
 
 # The API's single-letter direction codes -> this project's own
@@ -101,6 +103,7 @@ def fetch_from_national_highways_traffic_search(road_name: str, page_size: int =
     results = []
     page = 1
     max_pages = 20  # safety cap so a pagination bug can't loop forever
+    label = f"NH Traffic Search (beta) -- {road_name}"
 
     while page <= max_pages:
         print(f"Fetching {TRAFFIC_SEARCH_BASE_URL}?page={page}&limit={page_size}&road={road_name} ...")
@@ -109,10 +112,12 @@ def fetch_from_national_highways_traffic_search(road_name: str, page_size: int =
         except urllib.error.HTTPError as e:
             print(f"Warning: HTTP {e.code} {e.reason} fetching National Highways traffic "
                   f"search data -- skipping this source.")
+            status.record_status(label, ok=False, error=f"HTTP {e.code} {e.reason}")
             return []
         except Exception as e:  # noqa: BLE001 -- this source is best-effort, never fatal
             print(f"Warning: failed to fetch National Highways traffic search data ({e}) "
                   f"-- skipping this source.")
+            status.record_status(label, ok=False, error=str(e))
             return []
 
         records = payload.get("data", [])
@@ -132,4 +137,5 @@ def fetch_from_national_highways_traffic_search(road_name: str, page_size: int =
         page += 1
 
     print(f"  {len(results)} match {road_name}")
+    status.record_status(label, ok=True, count=len(results))
     return results
