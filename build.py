@@ -46,6 +46,7 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 from matching import build_direction
+from sources import status
 from sources.national_highways import fetch_from_flat_mirror, fetch_from_national_highways_api
 from sources.national_highways_traffic_search import fetch_from_national_highways_traffic_search
 from sources.scotland_incidents import fetch_from_scotland_incidents
@@ -154,12 +155,33 @@ def load_additional_closures(site_cfg: dict) -> list[dict]:
 
 
 def main() -> None:
+    status.reset()  # last-build-only status registry (see sources/status.py) --
+                     # cleared so re-running main() in the same process (e.g. tests)
+                     # doesn't accumulate stale entries from a previous run.
     config = load_routes()
     site_cfg = config["site"]
 
     closures, feed_updated = load_closures(site_cfg)
     closures.extend(load_additional_closures(site_cfg))
     print(f"Total closures across all sources: {len(closures)}")
+
+    # Whether the PRIMARY source (site.source) failed this build -- checked
+    # by label prefix rather than threaded through as a separate return
+    # value, since sources/national_highways.py already records this via
+    # the same shared status registry every other source uses (see its
+    # module docstring). Triggers a prominent, page-level warning banner
+    # on EVERY page (not just the collapsed status panel on index.html,
+    # and not just a log line) -- unlike an additional source going quiet,
+    # a failed PRIMARY source means the page is very likely under-reporting
+    # real closures, which is materially different from "no disruptions
+    # right now" and worth surfacing loudly rather than silently. See
+    # sources/national_highways.py's PrimarySourceError docstring for the
+    # full reasoning behind not hard-failing the whole build over this
+    # anymore.
+    primary_source_failed = any(
+        s["label"].startswith("Primary Source") and s["state"] == "failed"
+        for s in status.get_statuses()
+    )
 
     generated_at = datetime.now(ZoneInfo("Europe/London")).strftime("%d %b %Y, %H:%M %Z")
     if not feed_updated:
@@ -196,6 +218,7 @@ def main() -> None:
                 feed_updated=feed_updated,
                 style_hash=style_hash,
                 script_hash=script_hash,
+                primary_source_failed=primary_source_failed,
             )
             (OUTPUT_DIR / f"{page_id}.html").write_text(html, encoding="utf-8")
 
@@ -233,6 +256,8 @@ def main() -> None:
         feed_updated=feed_updated,
         style_hash=style_hash,
         script_hash=script_hash,
+        source_statuses=status.get_statuses(),
+        primary_source_failed=primary_source_failed,
     )
     (OUTPUT_DIR / "index.html").write_text(index_html, encoding="utf-8")
 

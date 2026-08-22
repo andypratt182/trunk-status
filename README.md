@@ -816,12 +816,14 @@ main API this project already parses.
 module docstring for the full design and, most importantly, **known
 limitations**: TomTom's incident data has no reliable direction field,
 so an incident with no explicit direction word in its own text is shown
-on **both** directions rather than guessed or dropped; the default
-bounding box is a generous, unverified-against-a-live-map approximation
-of the M74/M6/M57/M58/M62 corridor; and this source could report the
-same physical accident that Travel Alerts or the beta endpoint also
-report, with no shared ID to dedupe against — a known limitation, not a
-guessed-at fix.
+on **both** directions rather than guessed or dropped; the three
+default bounding boxes are a reasonable-effort split of the corridor
+(TomTom enforces a hard 10,000km² limit per request — confirmed live,
+not just documented — so one box covering the whole route network isn't
+possible), not verified against a live map for exact junction coverage;
+and this source could report the same physical accident that Travel
+Alerts or the beta endpoint also report, with no shared ID to dedupe
+against — a known limitation, not a guessed-at fix.
 
 To enable it: get a free API key at https://developer.tomtom.com/ (see
 "API & SDK Keys" in the dashboard), add it as a GitHub Actions secret
@@ -832,6 +834,58 @@ road sharing the same bounding box — the normal case — is fetched in a
 single shared HTTP request, so adding more roads costs nothing extra. A
 missing key just warns and skips this one source; it never fails the
 build.
+
+## Data sources status (on the site itself)
+
+The index page has a collapsed "Data sources status" panel at the
+bottom, showing every configured source — including the primary one —
+with one of three states: 🟢 fetched fine and found results, 🟡 fetched
+fine but found nothing this time, 🔴 the fetch itself failed. This
+exists because most of these sources' fetch/parse failures were already
+being silently swallowed (caught internally, logged, and turned into an
+empty result list) so a broken scraper could go unnoticed for weeks —
+but several of these sources are ALSO legitimately, normally quiet most
+of the time (Travel Alerts, the NH beta search, sometimes TomTom). A
+naive "red if 0 results" indicator would be permanently, misleadingly
+red on ordinary days, so 🟡 exists specifically to make that distinction
+honestly rather than lose it.
+
+Implemented via `sources/status.py`, a small shared registry each
+source module reports into at the exact point it already knows its own
+outcome (inside its own existing try/except) — see that file's
+docstring for the full reasoning, including why this is a deliberate,
+documented exception to this project's usual "no cross-imports between
+sources" pattern (`traffic_scotland.py` already made the same exception
+for `matching.py`).
+
+**The primary source (`site.source`) used to be an exception to all of
+this** — a failure there raised `SystemExit` and stopped the whole
+build outright, so no page was ever published showing a primary-source
+failure; that failure was only visible via the GitHub Actions run
+itself failing. This was changed: `sources/national_highways.py` now
+follows the exact same best-effort pattern as every other source
+(catch, record status, return what it has, never crash the build) — see
+`PrimarySourceError`'s docstring there for the full reasoning. This was
+a genuine, deliberate tradeoff, not a pure improvement: the primary
+source is almost always the large majority of the data (thousands of
+records vs. a handful from the additional sources), so publishing a
+rebuilt page with it missing risks looking artificially "clear" — as if
+the road has few disruptions, when really the source that would show
+them just broke. To avoid that, a primary-source failure ALSO triggers
+a loud, page-level warning banner (⚠️, red, full-width, NOT collapsed)
+on **every** page — not just the discreet status panel on index.html —
+since someone could land directly on a route page via a bookmark or
+link and never see the index page at all. A single failed `closureType`
+request out of the two the live API needs (planned/unplanned) is
+treated the same way: the successfully-fetched half is kept and
+published, but the source is still honestly marked 🔴, not silently 🟢
+with an incomplete count.
+
+**Scope, otherwise:** this is last-build-only, not a history/trend — it
+reflects how the most recent build went, not whether a source has been
+quietly broken for weeks (a possible future addition, not built here —
+would need somewhere to persist state between separate GitHub Actions
+runs, e.g. a small committed JSON log).
 
 ## Set up your routes
 

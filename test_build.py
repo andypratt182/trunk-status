@@ -24,6 +24,7 @@ import build
 from sources import national_highways as nh
 from sources import national_highways_traffic_search as nhts
 from sources import scotland_incidents as si
+from sources import status as source_status
 from sources import tomtom_incidents as tti
 from sources import traffic_scotland as scot
 from sources import travel_alerts as ta
@@ -505,6 +506,50 @@ check("multiple segments sharing record_id collapse to one row", len(rows) == 1)
 
 
 # =======================================================================
+# sources/status.py -- shared "Data Sources" status registry
+# =======================================================================
+
+section("sources/status: record_status derives the right 3-way state")
+
+source_status.reset()
+source_status.record_status("Source A", ok=True, count=3)
+source_status.record_status("Source B", ok=True, count=0)
+source_status.record_status("Source C", ok=False, error="HTTP 500")
+_statuses = source_status.get_statuses()
+
+check("3 entries recorded, in the order they were added", len(_statuses) == 3)
+check(
+    "ok=True with count>0 -> 'ok_with_results' (green)",
+    _statuses[0] == {"label": "Source A", "state": "ok_with_results", "count": 3, "error": ""},
+)
+check(
+    "ok=True with count==0 -> 'ok_no_results' (amber) -- NOT treated as a failure, "
+    "since several real sources are legitimately quiet most of the time",
+    _statuses[1] == {"label": "Source B", "state": "ok_no_results", "count": 0, "error": ""},
+)
+check(
+    "ok=False -> 'failed' (red) regardless of count, with the error preserved",
+    _statuses[2] == {"label": "Source C", "state": "failed", "count": 0, "error": "HTTP 500"},
+)
+
+section("sources/status: reset() clears prior entries, get_statuses() returns a copy")
+
+source_status.reset()
+check("registry is empty immediately after reset()", source_status.get_statuses() == [])
+
+source_status.record_status("Source D", ok=True, count=1)
+_snapshot = source_status.get_statuses()
+source_status.record_status("Source E", ok=True, count=1)
+check(
+    "a previously-taken snapshot doesn't grow when a new status is recorded afterwards "
+    "-- get_statuses() must return a copy, not a live reference into the internal list",
+    len(_snapshot) == 1 and len(source_status.get_statuses()) == 2,
+)
+
+source_status.reset()  # leave the registry clean for every test below this point
+
+
+# =======================================================================
 # sources/national_highways.py
 # =======================================================================
 
@@ -625,6 +670,104 @@ check("only the planned records are returned", len(nh_closures_explicit) == 2)
 check("those records are also correctly tagged closure_category='planned'",
       all(c["closure_category"] == "planned" for c in nh_closures_explicit))
 
+section("national_highways: fetch_from_national_highways_api records status correctly (no more SystemExit)")
+
+source_status.reset()
+nh.fetch_json = _fake_nh_fetch_json
+try:
+    nh.fetch_from_national_highways_api({"lookahead_days": 7})
+finally:
+    nh.fetch_json = _original_nh_fetch_json
+_nh_ok_statuses = source_status.get_statuses()
+check(
+    "a fully successful fetch of both closureTypes records 'ok_with_results' (green)",
+    len(_nh_ok_statuses) == 1 and _nh_ok_statuses[0]["label"] == "Primary Source (National Highways Live API)"
+    and _nh_ok_statuses[0]["state"] == "ok_with_results" and _nh_ok_statuses[0]["count"] == 3,
+)
+
+source_status.reset()
+del os.environ["NATIONAL_HIGHWAYS_API_KEY"]
+try:
+    _nh_no_key_results = nh.fetch_from_national_highways_api({"lookahead_days": 7})
+finally:
+    os.environ["NATIONAL_HIGHWAYS_API_KEY"] = "fake-test-key-for-tests"
+_nh_no_key_statuses = source_status.get_statuses()
+check(
+    "REGRESSION GUARD: a missing API key no longer raises SystemExit and crash the "
+    "whole build -- it now returns [] and records 'failed' (red), the same "
+    "best-effort pattern as every additional source",
+    _nh_no_key_results == [] and len(_nh_no_key_statuses) == 1
+    and _nh_no_key_statuses[0]["state"] == "failed"
+    and _nh_no_key_statuses[0]["error"] == "NATIONAL_HIGHWAYS_API_KEY not set",
+)
+
+source_status.reset()
+
+
+def _fake_nh_fetch_json_unplanned_fails(url, headers=None):
+    if "closureType=unplanned" in url:
+        raise urllib.error.HTTPError(url, 500, "Internal Server Error", {}, None)
+    return _nh_planned_payload, {}
+
+
+nh.fetch_json = _fake_nh_fetch_json_unplanned_fails
+try:
+    _nh_partial_results = nh.fetch_from_national_highways_api({"lookahead_days": 7})
+finally:
+    nh.fetch_json = _original_nh_fetch_json
+_nh_partial_statuses = source_status.get_statuses()
+check(
+    "REGRESSION GUARD: one closureType (unplanned) failing no longer crashes the "
+    "whole build or discards the other, successfully-fetched closureType (planned) -- "
+    "the good partial data is kept",
+    len(_nh_partial_results) == 2 and all(c["closure_category"] == "planned" for c in _nh_partial_results),
+)
+check(
+    "a partial failure still honestly records 'failed' (red) overall, not 'ok' with "
+    "a silently-incomplete count -- this is exactly the situation the primary-source "
+    "warning banner exists to surface loudly on every page",
+    len(_nh_partial_statuses) == 1 and _nh_partial_statuses[0]["state"] == "failed"
+    and "1/2" in _nh_partial_statuses[0]["error"],
+)
+
+source_status.reset()
+
+section("national_highways: fetch_from_flat_mirror records status correctly (no more SystemExit)")
+
+_nh_flat_payload = {"updated": "2026-08-20T12:00:00Z", "closures": [
+    {"id": "a", "road_name": "M6"}, {"id": "b", "road_name": "M62"},
+]}
+nh.fetch_json = lambda url, headers=None: (_nh_flat_payload, {})
+try:
+    _nh_flat_closures, _nh_flat_updated = nh.fetch_from_flat_mirror({"data_url": "https://example.com/data.json"})
+finally:
+    nh.fetch_json = _original_nh_fetch_json
+_nh_flat_ok_statuses = source_status.get_statuses()
+check("both closures loaded", len(_nh_flat_closures) == 2)
+check(
+    "a successful flat-mirror fetch records 'ok_with_results' (green)",
+    len(_nh_flat_ok_statuses) == 1 and _nh_flat_ok_statuses[0]["label"] == "Primary Source (Flat JSON Mirror)"
+    and _nh_flat_ok_statuses[0]["state"] == "ok_with_results" and _nh_flat_ok_statuses[0]["count"] == 2,
+)
+
+source_status.reset()
+nh.fetch_json = lambda url, headers=None: (_ for _ in ()).throw(
+    urllib.error.HTTPError(url, 404, "Not Found", {}, None)
+)
+try:
+    _nh_flat_fail_closures, _nh_flat_fail_updated = nh.fetch_from_flat_mirror({"data_url": "https://example.com/data.json"})
+finally:
+    nh.fetch_json = _original_nh_fetch_json
+_nh_flat_fail_statuses = source_status.get_statuses()
+check(
+    "REGRESSION GUARD: a flat-mirror fetch failure no longer raises SystemExit -- "
+    "returns ([], '') and records 'failed' (red)",
+    _nh_flat_fail_closures == [] and _nh_flat_fail_updated == ""
+    and len(_nh_flat_fail_statuses) == 1 and _nh_flat_fail_statuses[0]["state"] == "failed",
+)
+
+source_status.reset()
+
 
 section("national_highways: find_next_page_url")
 
@@ -687,6 +830,73 @@ section("xlsx_advance_notice: unrecognized schema -> graceful no-match")
 
 header_idx, col_map = xlsx.find_header_row([("Foo", "Bar", "Baz")] * 8)
 check("no header found for unrelated columns", header_idx is None)
+
+section("xlsx_advance_notice: fetch_from_xlsx_advance_notice records status correctly")
+
+import io as _io
+import openpyxl as _openpyxl
+import urllib.error as _urllib_error
+import urllib.request as _xlsx_urllib_request
+
+_wb = _openpyxl.Workbook()
+_ws = _wb.active
+_ws.append(("Road Number", "Direction", "Location", "Scheduled Start Time",
+            "Scheduled End Time", "Closure Details Including Diversions"))
+_ws.append(("M6", "Southbound", "J40 to J39", "2026-08-20", "2026-08-21", "Full closure"))
+_xlsx_bytes = _io.BytesIO()
+_wb.save(_xlsx_bytes)
+_xlsx_bytes = _xlsx_bytes.getvalue()
+
+
+class _FakeXlsxResp:
+    def __init__(self, data):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+_original_xlsx_urlopen = _xlsx_urllib_request.urlopen
+
+source_status.reset()
+_xlsx_urllib_request.urlopen = lambda req, timeout=60: _FakeXlsxResp(_xlsx_bytes)
+try:
+    _xlsx_results = xlsx.fetch_from_xlsx_advance_notice("https://example.com/report.xlsx")
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+
+check("real workbook bytes parse into exactly 1 closure row", len(_xlsx_results) == 1)
+_xlsx_statuses = source_status.get_statuses()
+check("exactly 1 status entry recorded for the successful fetch", len(_xlsx_statuses) == 1)
+check(
+    "successful fetch with a real result records 'ok_with_results' (green), count matches",
+    _xlsx_statuses[0]["state"] == "ok_with_results" and _xlsx_statuses[0]["count"] == 1,
+)
+
+source_status.reset()
+_xlsx_urllib_request.urlopen = lambda req, timeout=60: (_ for _ in ()).throw(
+    _urllib_error.HTTPError("https://example.com/report.xlsx", 404, "Not Found", {}, None)
+)
+try:
+    _xlsx_fail_results = xlsx.fetch_from_xlsx_advance_notice("https://example.com/report.xlsx")
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+
+check("a genuine fetch failure returns [] (never crashes the build)", _xlsx_fail_results == [])
+_xlsx_fail_statuses = source_status.get_statuses()
+check(
+    "a genuine HTTP failure records 'failed' (red), NOT 'ok_no_results' (amber) -- "
+    "this is the exact distinction the whole status feature exists to get right",
+    _xlsx_fail_statuses[0]["state"] == "failed" and "404" in _xlsx_fail_statuses[0]["error"],
+)
+
+source_status.reset()
 
 
 # =======================================================================
@@ -1165,6 +1375,63 @@ check(
     live_results[0]["validity_status"] == "active",
 )
 
+section("traffic_scotland: fetch_from_traffic_scotland records status correctly")
+
+source_status.reset()
+scot.fetch_text = fake_fetch_text_live  # reuse the real-content fixture above -- 1 real result
+try:
+    scot.fetch_from_traffic_scotland("M74")
+finally:
+    scot.fetch_text = _original_fetch_text
+_scot_ok_statuses = source_status.get_statuses()
+check("1 status entry recorded", len(_scot_ok_statuses) == 1)
+check(
+    "a successful fetch with a real result records 'ok_with_results' (green)",
+    _scot_ok_statuses[0]["state"] == "ok_with_results" and _scot_ok_statuses[0]["count"] == 1,
+)
+
+source_status.reset()
+
+
+def fake_fetch_text_both_pages_fail(url, headers=None):
+    raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, None)
+
+
+scot.fetch_text = fake_fetch_text_both_pages_fail
+try:
+    _scot_fail_results = scot.fetch_from_traffic_scotland("M74")
+finally:
+    scot.fetch_text = _original_fetch_text
+_scot_fail_statuses = source_status.get_statuses()
+check("both listing pages failing returns [] (never crashes the build)", _scot_fail_results == [])
+check(
+    "both listing pages failing to even fetch records 'failed' (red) -- distinct "
+    "from the pre-existing 'Warning: 0 matching entries' case below, which is a "
+    "genuinely different, non-failure situation and must record 'ok_no_results' instead",
+    len(_scot_fail_statuses) == 1 and _scot_fail_statuses[0]["state"] == "failed",
+)
+
+source_status.reset()
+
+
+def fake_fetch_text_both_pages_empty(url, headers=None):
+    return "<html><body>nothing relevant here</body></html>"
+
+
+scot.fetch_text = fake_fetch_text_both_pages_empty
+try:
+    _scot_empty_results = scot.fetch_from_traffic_scotland("M74")
+finally:
+    scot.fetch_text = _original_fetch_text
+_scot_empty_statuses = source_status.get_statuses()
+check(
+    "both listing pages fetching fine but finding 0 matching entries records "
+    "'ok_no_results' (amber), NOT 'failed' (red) -- the fetch itself worked",
+    len(_scot_empty_statuses) == 1 and _scot_empty_statuses[0]["state"] == "ok_no_results",
+)
+
+source_status.reset()
+
 
 section("matching: lane_info flows through rows_for_leg into the rendered row")
 
@@ -1260,6 +1527,72 @@ tmp_path.write_bytes(b"body { color: blue; }")
 hash2 = build.content_hash(tmp_path)
 check("hash changes when file content changes (forces a fresh fetch)", hash1 != hash2)
 tmp_path.unlink()
+
+section("build: primary_source_failed detection (by label prefix in the status registry)")
+
+source_status.reset()
+source_status.record_status("Primary Source (National Highways Live API)", ok=False, error="HTTP 500")
+source_status.record_status("Travel Alerts -- M6", ok=True, count=0)
+_primary_failed = any(
+    s["label"].startswith("Primary Source") and s["state"] == "failed"
+    for s in source_status.get_statuses()
+)
+check("a failed 'Primary Source (...)' entry is correctly detected", _primary_failed is True)
+
+source_status.reset()
+source_status.record_status("Primary Source (National Highways Live API)", ok=True, count=500)
+source_status.record_status("Travel Alerts -- M6", ok=False, error="HTTP 500")
+_primary_failed_2 = any(
+    s["label"].startswith("Primary Source") and s["state"] == "failed"
+    for s in source_status.get_statuses()
+)
+check(
+    "an ADDITIONAL source failing does NOT trigger the primary-source banner -- "
+    "only a 'Primary Source (...)'-labeled entry does",
+    _primary_failed_2 is False,
+)
+
+source_status.reset()
+
+section("base.html: primary-source-failed warning banner")
+
+from jinja2 import Environment as _JinjaEnv, FileSystemLoader as _JinjaLoader
+
+_base_env = _JinjaEnv(loader=_JinjaLoader("templates"))
+_index_html_with_failure = _base_env.get_template("index.html").render(
+    site_title="X", route_cards=[], generated_at="X", feed_updated="X",
+    style_hash="", script_hash="", primary_source_failed=True,
+)
+check(
+    "the warning banner renders on index.html when primary_source_failed is True",
+    "primary-source-warning" in _index_html_with_failure and "may be missing current closures" in _index_html_with_failure,
+)
+
+_route_html_with_failure = _base_env.get_template("route.html").render(
+    site_title="X", route_name="X", direction_label="X", leg_groups=[],
+    generated_at="X", feed_updated="X", style_hash="", script_hash="",
+    primary_source_failed=True,
+)
+check(
+    "the same banner ALSO renders on route.html, not just index.html -- someone can "
+    "land directly on a route page (bookmark/link) and never see the index page at all",
+    "primary-source-warning" in _route_html_with_failure,
+)
+
+_index_html_no_failure = _base_env.get_template("index.html").render(
+    site_title="X", route_cards=[], generated_at="X", feed_updated="X",
+    style_hash="", script_hash="", primary_source_failed=False,
+)
+check("no banner when primary_source_failed is False", "primary-source-warning" not in _index_html_no_failure)
+
+_index_html_default = _base_env.get_template("index.html").render(
+    site_title="X", route_cards=[], generated_at="X", feed_updated="X",
+    style_hash="", script_hash="",  # primary_source_failed omitted entirely
+)
+check(
+    "no banner (and no template error) when primary_source_failed isn't passed at all",
+    "primary-source-warning" not in _index_html_default,
+)
 
 
 # =======================================================================
@@ -1390,6 +1723,59 @@ check(
     "A31's cleaned location has no usable junction (M27's correctly stripped)",
     matching._junctions_in_text(_ta_a31_results[0]["location_description"]) == [],
 )
+
+section("travel_alerts: fetch_from_travel_alerts records status correctly")
+
+source_status.reset()
+_urllib_request.urlopen = lambda req, timeout=60: _FakeTaResp(_ta_listing_html)
+ta._page_cache.clear()
+try:
+    ta.fetch_from_travel_alerts("M6")
+finally:
+    _urllib_request.urlopen = _original_ta_urlopen
+_ta_ok_statuses = source_status.get_statuses()
+check(
+    "a successful fetch with a real result records 'ok_with_results' (green)",
+    len(_ta_ok_statuses) == 1 and _ta_ok_statuses[0]["state"] == "ok_with_results"
+    and _ta_ok_statuses[0]["count"] == 1,
+)
+
+source_status.reset()
+ta._page_cache.clear()
+_urllib_request.urlopen = lambda req, timeout=60: _FakeTaResp(_ta_listing_html)
+try:
+    # A road that genuinely isn't present in this fixture -- the fetch
+    # itself succeeds, it just finds nothing for this specific road,
+    # exactly the everyday case this whole feature exists to NOT flag red.
+    ta.fetch_from_travel_alerts("M99")
+finally:
+    _urllib_request.urlopen = _original_ta_urlopen
+_ta_empty_statuses = source_status.get_statuses()
+check(
+    "a successful fetch that finds 0 matches for THIS road records 'ok_no_results' "
+    "(amber), not 'failed' (red) -- Travel Alerts is legitimately quiet for most roads "
+    "most of the time by design (see module docstring)",
+    len(_ta_empty_statuses) == 1 and _ta_empty_statuses[0]["state"] == "ok_no_results",
+)
+
+source_status.reset()
+ta._page_cache.clear()
+_urllib_request.urlopen = lambda req, timeout=60: (_ for _ in ()).throw(
+    urllib.error.HTTPError("https://nationalhighways.co.uk/", 500, "Internal Server Error", {}, None)
+)
+try:
+    _ta_fail_results = ta.fetch_from_travel_alerts("M6")
+finally:
+    _urllib_request.urlopen = _original_ta_urlopen
+_ta_fail_statuses = source_status.get_statuses()
+check("a genuine fetch failure returns [] (never crashes the build)", _ta_fail_results == [])
+check(
+    "a genuine listing-page fetch failure records 'failed' (red)",
+    len(_ta_fail_statuses) == 1 and _ta_fail_statuses[0]["state"] == "failed",
+)
+
+source_status.reset()
+ta._page_cache.clear()
 
 section("matching: BOTH_DIRECTIONS_VALUES wildcard (real Travel Alerts case)")
 
@@ -1601,6 +1987,47 @@ check(
 _si_rows = matching.rows_for_leg(_si_m74_results, "M74", "Northbound", 1, 10)
 check("correctly matches an M74 J1-10 style leg (2 real northbound M74 entries)", len(_si_rows) == 2)
 
+section("scotland_incidents: fetch_from_scotland_incidents records status correctly")
+
+source_status.reset()
+si._page_cache.clear()
+_urllib_request_si.urlopen = lambda req, timeout=60: _FakeSiResp(_si_listing_html)
+try:
+    si.fetch_from_scotland_incidents("M74")
+    si.fetch_from_scotland_incidents("A90")  # not present in this fixture
+finally:
+    _urllib_request_si.urlopen = _original_si_urlopen
+_si_statuses = source_status.get_statuses()
+check("2 status entries recorded, one per road_name call", len(_si_statuses) == 2)
+check(
+    "M74 (3 real matches) records 'ok_with_results' (green)",
+    _si_statuses[0]["state"] == "ok_with_results" and _si_statuses[0]["count"] == 3,
+)
+check(
+    "A90 (fetch succeeded, genuinely 0 matches for this road) records "
+    "'ok_no_results' (amber), not 'failed'",
+    _si_statuses[1]["state"] == "ok_no_results" and _si_statuses[1]["count"] == 0,
+)
+
+source_status.reset()
+si._page_cache.clear()
+_urllib_request_si.urlopen = lambda req, timeout=60: (_ for _ in ()).throw(
+    urllib.error.HTTPError("https://trafficscotland.org/", 502, "Bad Gateway", {}, None)
+)
+try:
+    _si_fail_results = si.fetch_from_scotland_incidents("M74")
+finally:
+    _urllib_request_si.urlopen = _original_si_urlopen
+_si_fail_statuses = source_status.get_statuses()
+check("a genuine fetch failure returns [] (never crashes the build)", _si_fail_results == [])
+check(
+    "a genuine listing-page fetch failure records 'failed' (red)",
+    len(_si_fail_statuses) == 1 and _si_fail_statuses[0]["state"] == "failed",
+)
+
+source_status.reset()
+si._page_cache.clear()
+
 
 # =======================================================================
 # sources/national_highways_traffic_search.py
@@ -1713,6 +2140,58 @@ check(
     "a mismatched road is excluded even if the (already server-filtered) API somehow returned one",
     len(_nhts_filtered) == 1 and _nhts_filtered[0]["road_name"] == "M6",
 )
+
+section("national_highways_traffic_search: records status correctly")
+
+source_status.reset()
+_nhts_page_success = {"data": [{"id": "z", "road": "M6", "direction": "N", "location": "M6 J1"}],
+                      "pagination": {"totalItems": 1, "currentPage": 1, "pageSize": 10, "totalPages": 1}}
+nhts.fetch_page = lambda road_name, page, page_size: _nhts_page_success
+try:
+    nhts.fetch_from_national_highways_traffic_search("M6")
+finally:
+    nhts.fetch_page = _original_nhts_fetch_page
+_nhts_ok_statuses = source_status.get_statuses()
+check(
+    "a successful fetch with a real result records 'ok_with_results' (green)",
+    len(_nhts_ok_statuses) == 1 and _nhts_ok_statuses[0]["state"] == "ok_with_results"
+    and _nhts_ok_statuses[0]["count"] == 1,
+)
+
+source_status.reset()
+_nhts_page_empty = {"data": [], "pagination": {"totalItems": 0, "currentPage": 1, "pageSize": 10, "totalPages": 1}}
+nhts.fetch_page = lambda road_name, page, page_size: _nhts_page_empty
+try:
+    nhts.fetch_from_national_highways_traffic_search("M6")
+finally:
+    nhts.fetch_page = _original_nhts_fetch_page
+_nhts_empty_statuses = source_status.get_statuses()
+check(
+    "a successful fetch that legitimately finds 0 records records 'ok_no_results' "
+    "(amber), not 'failed'",
+    len(_nhts_empty_statuses) == 1 and _nhts_empty_statuses[0]["state"] == "ok_no_results",
+)
+
+source_status.reset()
+
+
+def _fake_nhts_fetch_page_fail(road_name, page, page_size):
+    raise urllib.error.HTTPError("https://nationalhighways.co.uk/", 500, "Internal Server Error", {}, None)
+
+
+nhts.fetch_page = _fake_nhts_fetch_page_fail
+try:
+    _nhts_fail_results = nhts.fetch_from_national_highways_traffic_search("M6")
+finally:
+    nhts.fetch_page = _original_nhts_fetch_page
+_nhts_fail_statuses = source_status.get_statuses()
+check("a genuine fetch failure returns [] (never crashes the build)", _nhts_fail_results == [])
+check(
+    "a genuine fetch failure records 'failed' (red)",
+    len(_nhts_fail_statuses) == 1 and _nhts_fail_statuses[0]["state"] == "failed",
+)
+
+source_status.reset()
 
 
 # =======================================================================
@@ -1828,6 +2307,69 @@ finally:
 
 check("missing API key returns an empty list rather than raising", _tti_no_key_result == [])
 check("missing API key never even attempts a fetch", _tti_calls == [])
+check(
+    "missing API key records 'failed' (red), not 'ok_no_results' (amber) -- the "
+    "source never even attempted to run this build, which is worth flagging "
+    "distinctly from 'ran fine, found nothing'",
+    source_status.get_statuses() == [
+        {"label": "TomTom Incidents -- M6", "state": "failed", "count": 0, "error": "TOMTOM_API_KEY not set"}
+    ],
+)
+source_status.reset()
+
+section("tomtom_incidents: fetch_from_tomtom_incidents records status correctly (beyond the missing-key case above)")
+
+tti._response_cache.clear()
+tti.fetch_page = lambda bbox, category_filter, api_key: {"incidents": [_tti_feature_m6_no_direction]}
+try:
+    tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
+finally:
+    tti.fetch_page = _original_tti_fetch_page
+_tti_ok_statuses = source_status.get_statuses()
+check(
+    "a successful fetch with a real result records 'ok_with_results' (green)",
+    len(_tti_ok_statuses) == 1 and _tti_ok_statuses[0]["state"] == "ok_with_results"
+    and _tti_ok_statuses[0]["count"] == 1,
+)
+
+source_status.reset()
+tti._response_cache.clear()
+tti.fetch_page = lambda bbox, category_filter, api_key: {"incidents": []}
+try:
+    tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
+finally:
+    tti.fetch_page = _original_tti_fetch_page
+_tti_empty_statuses = source_status.get_statuses()
+check(
+    "a successful fetch that legitimately finds 0 incidents records 'ok_no_results' "
+    "(amber), not 'failed'",
+    len(_tti_empty_statuses) == 1 and _tti_empty_statuses[0]["state"] == "ok_no_results",
+)
+
+source_status.reset()
+tti._response_cache.clear()
+
+
+def _fake_tti_fetch_page_fail(bbox, category_filter, api_key):
+    raise urllib.error.HTTPError("https://api.tomtom.com/", 500, "Internal Server Error", {}, None)
+
+
+tti.fetch_page = _fake_tti_fetch_page_fail
+try:
+    _tti_fail_results = tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
+finally:
+    tti.fetch_page = _original_tti_fetch_page
+_tti_fail_statuses = source_status.get_statuses()
+check("a genuine fetch failure returns [] (never crashes the build)", _tti_fail_results == [])
+check(
+    "a genuine bbox fetch failure records 'failed' (red), mentioning how many "
+    "of the configured bboxes failed",
+    len(_tti_fail_statuses) == 1 and _tti_fail_statuses[0]["state"] == "failed"
+    and "1/1" in _tti_fail_statuses[0]["error"],
+)
+
+source_status.reset()
+tti._response_cache.clear()
 
 section("tomtom_incidents: shared bbox is fetched once across multiple roads (caching)")
 
@@ -1941,6 +2483,54 @@ check(
     "Diversion: Follow mainline closure" not in re.search(
         r'<td class="location-cell"[^>]*>.*?</td>', _html, re.S
     ).group(0),
+)
+
+
+# =======================================================================
+# templates/index.html: Data sources status panel
+# =======================================================================
+
+section("index.html: Data sources status panel")
+
+_index_env = _JinjaEnv(loader=_JinjaLoader("templates"))
+_index_statuses = [
+    {"label": "Source A", "state": "ok_with_results", "count": 3, "error": ""},
+    {"label": "Source B", "state": "ok_no_results", "count": 0, "error": ""},
+    {"label": "Source C", "state": "failed", "count": 0, "error": "HTTP 500 Internal Server Error"},
+]
+_index_html = _index_env.get_template("index.html").render(
+    site_title="X", route_cards=[], generated_at="X", feed_updated="X",
+    style_hash="", script_hash="", source_statuses=_index_statuses,
+)
+
+check("panel renders when statuses are present", "source-status" in _index_html)
+check("green circle shown for the ok_with_results entry", "🟢" in _index_html and "Source A" in _index_html)
+check("amber circle shown for the ok_no_results entry", "🟡" in _index_html)
+check("red circle shown for the failed entry", "🔴" in _index_html)
+check("the failed entry's error text is shown, not just its count", "HTTP 500 Internal Server Error" in _index_html)
+check(
+    "summary flags exactly 1 issue (matching the 1 failed entry above)",
+    "1 issue" in _index_html,
+)
+
+_index_html_no_statuses = _index_env.get_template("index.html").render(
+    site_title="X", route_cards=[], generated_at="X", feed_updated="X",
+    style_hash="", script_hash="",  # source_statuses omitted entirely
+)
+check(
+    "the whole panel is omitted (not rendered empty/broken) when source_statuses "
+    "isn't passed at all -- backward compatible with any other caller of this template",
+    "source-status" not in _index_html_no_statuses,
+)
+
+_index_html_all_ok = _index_env.get_template("index.html").render(
+    site_title="X", route_cards=[], generated_at="X", feed_updated="X",
+    style_hash="", script_hash="",
+    source_statuses=[{"label": "Source A", "state": "ok_with_results", "count": 1, "error": ""}],
+)
+check(
+    "no '-- N issue(s)' flag shown in the summary when nothing has failed",
+    "issue" not in _index_html_all_ok,
 )
 
 
