@@ -1,0 +1,15 @@
+# investigation-log/tracked-source-entries.jsonl (see investigation_log.py)
+# is append-only -- each line is an independent, self-contained JSON
+# record, so two overlapping GitHub Actions runs adding DIFFERENT new
+# lines is expected, not a real conflict. Without this, git's default
+# 3-way merge sees "both sides created/changed the same file" and asks a
+# human to resolve it by hand (exactly the CONFLICT (add/add) a workflow
+# run hit) -- which no one's watching, since this all happens inside an
+# unattended `git pull --rebase` in the build workflow. The built-in
+# `union` merge driver instead keeps every line from both sides (only
+# exact-duplicate lines are collapsed), which is the semantically
+# correct resolution for this specific append-only shape.
+#
+# TEMPORARY, same as investigation_log.py itself -- remove this file (or
+# just this line) once that investigation is done.
+investigation-log/tracked-source-entries.jsonl merge=union
