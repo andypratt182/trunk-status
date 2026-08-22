@@ -85,6 +85,23 @@ button:focus-visible {
   text-align: right;
 }
 
+/* Primary-source-failed warning banner -- deliberately loud (full-width,
+   red, not collapsed, shown on EVERY page) since this is a materially
+   different situation from an additional source going quiet: it means
+   the page could genuinely be under-reporting real closures, not just
+   "no incidents right now". See base.html and build.py's main() for
+   when this renders. */
+.primary-source-warning {
+  background: var(--red-dim);
+  border-bottom: 2px solid var(--red);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.primary-source-warning .wrap {
+  padding: 10px 20px;
+}
+
 /* --- Route cards on index --- */
 .route-grid {
   width: 100%;
@@ -397,6 +414,60 @@ table.closures tbody tr:last-child td { border-bottom: none; }
 }
 
 .back-link { display: inline-block; margin-top: 26px; font-size: 0.85rem; }
+
+/* Data sources status panel (index.html only) -- a native <details>
+   disclosure, same collapse/expand pattern as .more-info-cell above
+   (custom marker, no JS). Deliberately understated -- this is a
+   diagnostic aid for whoever runs the site, not a headline feature, so
+   it sits collapsed by default below the route cards. */
+.source-status {
+  margin-top: 26px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.source-status summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  user-select: none;
+}
+.source-status summary::-webkit-details-marker { display: none; }
+.source-status summary::before {
+  content: "\25b6";
+  font-size: 0.7em;
+  transition: transform 0.15s ease;
+}
+.source-status details[open] summary::before,
+.source-status[open] summary::before {
+  transform: rotate(90deg);
+}
+.source-status-summary-flag { color: var(--red); }
+.source-status-hint {
+  margin: 8px 0 10px;
+  font-size: 0.76rem;
+}
+.source-status-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.source-status-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--panel-border);
+}
+.source-status-icon { font-size: 0.9em; }
+.source-status-label { color: var(--text); flex: 1; }
+.source-status-detail { color: var(--text-muted); font-size: 0.78rem; }
+.source-status-failed .source-status-detail { color: var(--red); }
 
 footer.site-footer {
   margin-top: 48px;
