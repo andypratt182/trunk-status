@@ -21,6 +21,7 @@ import urllib.error
 
 import matching
 import build
+import investigation_log
 from sources import national_highways as nh
 from sources import national_highways_traffic_search as nhts
 from sources import scotland_incidents as si
@@ -1527,6 +1528,72 @@ tmp_path.write_bytes(b"body { color: blue; }")
 hash2 = build.content_hash(tmp_path)
 check("hash changes when file content changes (forces a fresh fetch)", hash1 != hash2)
 tmp_path.unlink()
+
+section("investigation_log: log_new_entries (temporary investigation aid)")
+
+_il_closures = [
+    {"record_id": "ta-1", "source_label": "Travel Alert (major incident)", "road_name": "M6"},
+    {"record_id": "nhts-1", "source_label": "National Highways Traffic Search (beta)", "road_name": "M6"},
+    {"record_id": "tti-1", "source_label": "TomTom Traffic Incident", "road_name": "M6"},
+    {"record_id": "xlsx-1", "source_label": "Advance notice (full closure)", "road_name": "M6"},
+    {"record_id": "api-1", "source_label": "Live API", "road_name": "M6"},
+]
+
+with _tempfile.TemporaryDirectory() as _il_tmpdir:
+    _il_log_path = build.Path(_il_tmpdir) / "tracked-source-entries.jsonl"
+
+    _il_appended = investigation_log.log_new_entries(_il_closures, log_path=_il_log_path)
+    check(
+        "only the 3 TRACKED_SOURCE_LABELS entries are logged, NOT the XLSX/Live API "
+        "ones -- those aren't part of this investigation",
+        _il_appended == 3,
+    )
+    check("the log file was actually created", _il_log_path.exists())
+
+    _il_lines = _il_log_path.read_text(encoding="utf-8").strip().split("\n")
+    check("exactly 3 lines written", len(_il_lines) == 3)
+    _il_first_entry = json.loads(_il_lines[0])
+    check(
+        "each logged entry preserves the original record fields and adds first_seen_at",
+        _il_first_entry["record_id"] == "ta-1" and "first_seen_at" in _il_first_entry,
+    )
+
+    # Re-run with the SAME closures (simulating the next build, 10 minutes
+    # later, while the same incidents are still active) -- nothing new.
+    _il_appended_again = investigation_log.log_new_entries(_il_closures, log_path=_il_log_path)
+    check(
+        "re-logging the SAME still-active entries appends nothing new -- the file "
+        "doesn't grow every build for an incident that's simply still ongoing",
+        _il_appended_again == 0,
+    )
+    check(
+        "the file itself is unchanged (still exactly 3 lines) after the no-op re-run",
+        len(_il_log_path.read_text(encoding="utf-8").strip().split("\n")) == 3,
+    )
+
+    # A genuinely new entry appears (a 4th tracked-source record with a
+    # record_id not seen before) alongside the 3 already-logged ones.
+    _il_closures_with_new = _il_closures + [
+        {"record_id": "tti-2", "source_label": "TomTom Traffic Incident", "road_name": "M57"},
+    ]
+    _il_appended_new = investigation_log.log_new_entries(_il_closures_with_new, log_path=_il_log_path)
+    check("exactly 1 genuinely new entry is appended, not all 4 tracked entries again", _il_appended_new == 1)
+    check(
+        "the file now has 4 lines total (3 original + 1 new), not 7 (no duplication "
+        "of the already-logged 3)",
+        len(_il_log_path.read_text(encoding="utf-8").strip().split("\n")) == 4,
+    )
+
+with _tempfile.TemporaryDirectory() as _il_tmpdir2:
+    _il_empty_log_path = build.Path(_il_tmpdir2) / "tracked-source-entries.jsonl"
+    _il_no_tracked = [{"record_id": "xlsx-1", "source_label": "Advance notice (full closure)", "road_name": "M6"}]
+    _il_appended_none = investigation_log.log_new_entries(_il_no_tracked, log_path=_il_empty_log_path)
+    check(
+        "when nothing from a tracked source is present, 0 is returned and the log "
+        "file is never even created -- most builds should leave nothing to commit",
+        _il_appended_none == 0 and not _il_empty_log_path.exists(),
+    )
+
 
 section("build: primary_source_failed detection (by label prefix in the status registry)")
 

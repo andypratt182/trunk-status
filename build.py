@@ -45,6 +45,7 @@ from zoneinfo import ZoneInfo
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
+import investigation_log
 from matching import build_direction
 from sources import status
 from sources.national_highways import fetch_from_flat_mirror, fetch_from_national_highways_api
@@ -164,6 +165,10 @@ def main() -> None:
     closures, feed_updated = load_closures(site_cfg)
     closures.extend(load_additional_closures(site_cfg))
     print(f"Total closures across all sources: {len(closures)}")
+
+    # TEMPORARY investigation aid -- see investigation_log.py's module
+    # docstring for what this is for and when to remove it.
+    investigation_log.log_new_entries(closures)
 
     # Whether the PRIMARY source (site.source) failed this build -- checked
     # by label prefix rather than threaded through as a separate return
