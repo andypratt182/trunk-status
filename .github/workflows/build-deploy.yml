@@ -60,17 +60,47 @@ jobs:
       # re-run this whole workflow, which could commit again and trigger
       # again -- GitHub's Actions runner recognizes that marker and skips
       # starting a new run for a commit that contains it.
+      #
+      # Retries with a fresh pull/rebase between attempts, since two
+      # runs can still legitimately race to push around the same
+      # 10-minute mark -- .gitattributes' `merge=union` on this specific
+      # file (see that file's comments) makes the rebase itself resolve
+      # cleanly rather than conflict when that happens, but the push
+      # itself can still be rejected as non-fast-forward if another run
+      # wins the race in between our rebase and our push, hence retrying
+      # rather than assuming one attempt is enough. Deliberately never
+      # fails the job even if all retries are exhausted -- this log is a
+      # best-effort, non-critical diagnostic aid, not something worth
+      # blocking the actual site deploy over; a future run will likely
+      # still capture the same underlying entries if they're still
+      # active, since a record only stops being "new" once it's actually
+      # been committed.
       - name: Commit investigation log (temporary -- see investigation_log.py)
         run: |
-          if [ -n "$(git status --porcelain investigation-log/)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add investigation-log/
-            git commit -m "Update investigation log [skip ci]"
-            git pull --rebase
-            git push
-          else
+          if [ -z "$(git status --porcelain investigation-log/)" ]; then
             echo "No new investigation log entries this build."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add investigation-log/
+          git commit -m "Update investigation log [skip ci]"
+
+          pushed=false
+          for attempt in 1 2 3 4 5; do
+            if git pull --rebase && git push; then
+              pushed=true
+              break
+            fi
+            echo "Push attempt $attempt failed (another run likely pushed first) -- retrying..."
+            git rebase --abort || true
+            sleep $(( (RANDOM % 8) + attempt * 2 ))
+          done
+
+          if [ "$pushed" = false ]; then
+            echo "::warning::Could not push the investigation log after 5 attempts -- this run's new entries were not committed. Not treated as a build failure."
+            git rebase --abort || true
           fi
 
       - name: Upload pages artifact
