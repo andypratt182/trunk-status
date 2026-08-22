@@ -77,15 +77,11 @@
             {{ end_parts[0] }}<br>
             {% if end_parts|length > 1 %}{{ end_parts[1] }}{% endif %}
           </td>
-          <td class="more-info-cell" data-label="More Info">
-            <details>
+          <td class="more-info-cell" data-label="More Info">{% if row.comment and row.comment != row.location %}<details>
               <summary>More Information</summary>
-              {% if row.comment and row.comment != row.location %}
               <p>{{ row.comment }}</p>
-              {% endif %}
               <p class="closure-source">Source: {{ row.source_label }}</p>
-            </details>
-          </td>
+            </details>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

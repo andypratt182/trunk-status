@@ -28,4 +28,25 @@
 <script type="application/json" data-day-filter-summary="{{ d.page_id }}">{{ d.date_summary | tojson }}</script>
   {% endfor %}
 {% endfor %}
+
+{% set statuses = source_statuses | default([]) %}
+{% if statuses %}
+{% set failed_count = statuses | selectattr("state", "equalto", "failed") | list | length %}
+<details class="source-status">
+  <summary>
+    Data sources status
+    {% if failed_count %}<span class="source-status-summary-flag">— {{ failed_count }} issue{{ 's' if failed_count != 1 else '' }}</span>{% endif %}
+  </summary>
+  <p class="source-status-hint">Reflects this page's most recent build only — 🟢 fetched with results, 🟡 fetched successfully but nothing to show right now (normal for several of these), 🔴 the fetch itself failed.</p>
+  <ul class="source-status-list">
+    {% for s in statuses %}
+    <li class="source-status-{{ s.state }}">
+      <span class="source-status-icon" aria-hidden="true">{% if s.state == "ok_with_results" %}🟢{% elif s.state == "ok_no_results" %}🟡{% else %}🔴{% endif %}</span>
+      <span class="source-status-label">{{ s.label }}</span>
+      <span class="source-status-detail">{% if s.state == "failed" %}{{ s.error }}{% else %}{{ s.count }} result{{ 's' if s.count != 1 else '' }}{% endif %}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
 {% endblock %}

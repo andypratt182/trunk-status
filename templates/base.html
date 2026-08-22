@@ -20,6 +20,13 @@
     </div>
   </div>
 </header>
+{% if primary_source_failed %}
+<div class="primary-source-warning">
+  <div class="wrap">
+    ⚠️ The main data source failed to update on this build — this page may be missing current closures. Other sources are still shown below.
+  </div>
+</div>
+{% endif %}
 <main class="wrap fade-in">
 {% block content %}{% endblock %}
 <footer class="site-footer">
