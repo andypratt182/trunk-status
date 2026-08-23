@@ -103,24 +103,56 @@
     if (!startAttr) return false;
     const start = new Date(startAttr);
     if (isNaN(start.getTime())) return false;
-    const endParsed = endAttr ? new Date(endAttr) : start;
-    const end = isNaN(endParsed.getTime()) ? start : endParsed;
 
-    // A closure that's already fully ended shouldn't show under any
-    // specific-day filter (Today, Tomorrow, ...), even if its window
-    // technically touched that calendar day -- e.g. one running 22:00
-    // yesterday to 06:00 today did overlap "today" by calendar date, but
-    // by mid-morning it's simply over and no longer relevant to show
-    // under a "what's happening today" view. This only ever affects
-    // "Today" in practice, since every other day option is entirely in
-    // the future by construction and can't already have ended. This is
-    // ALSO now applied to "All" separately, via hasDefinitivelyEnded()
-    // above at each call site -- kept here too rather than removed, so
-    // this function's own behavior for Today/specific-day selections is
-    // completely unchanged either way.
-    if (end < new Date()) return false;
+    // CONFIRMED LIVE BUG, now fixed: this used to substitute `start` as
+    // a stand-in "end" whenever endAttr was missing -- turning an
+    // ongoing, no-stated-end incident (Travel Alerts always has no end
+    // time by design; TomTom often does too) into what looks like an
+    // instantaneous event that happened once, in the past, and is
+    // therefore already over. The "already ended" check below then
+    // wrongly excluded it from EVERY specific-day view (Today,
+    // Tomorrow, ...) -- while "All" never calls this function at all
+    // (short-circuited entirely when dayStart is null, see
+    // resolveRange()/applyIndexFilter()/applyTableFilter()), so the
+    // exact same entries survived there. A user caught this directly:
+    // the index page's own "N active" counts came out LOWER under
+    // "Today" than under "All" for every single route/direction shown
+    // -- which can never legitimately happen, since "active" means
+    // happening right now, and right now is always within today, so
+    // Today's active count can only be equal to, never less than,
+    // All's.
+    //
+    // Fixed by treating a genuinely unknown end as "ongoing
+    // indefinitely" instead of "ended at start": never treated as
+    // already-ended (matching hasDefinitivelyEnded()'s existing,
+    // correct treatment of a blank end elsewhere in this same file),
+    // and considered to overlap a given day as long as it had already
+    // started by that day's end -- with no upper bound to check against,
+    // since there isn't one.
+    const hasKnownEnd = !!endAttr && !isNaN(new Date(endAttr).getTime());
+    const end = hasKnownEnd ? new Date(endAttr) : null;
 
-    return start < dayEnd && end >= dayStart;
+    // A closure with a KNOWN end that has already passed shouldn't show
+    // under any specific-day filter (Today, Tomorrow, ...), even if its
+    // window technically touched that calendar day -- e.g. one running
+    // 22:00 yesterday to 06:00 today did overlap "today" by calendar
+    // date, but by mid-morning it's simply over and no longer relevant
+    // to show under a "what's happening today" view. This only ever
+    // affects "Today" in practice, since every other day option is
+    // entirely in the future by construction and can't already have
+    // ended. This is ALSO now applied to "All" separately, via
+    // hasDefinitivelyEnded() above at each call site -- kept here too
+    // rather than removed, so this function's own behavior for
+    // Today/specific-day selections is completely unchanged either way.
+    if (end !== null && end < new Date()) return false;
+
+    if (end !== null) {
+      return start < dayEnd && end >= dayStart;
+    }
+    // No known end: can't check an upper bound that doesn't exist --
+    // overlaps this day as long as it had already started by the end of
+    // it (it's ongoing indefinitely from `start` onward).
+    return start < dayEnd;
   }
 
   // Traffic Scotland's own current/planned split is just which listing
@@ -285,13 +317,30 @@
   const days = buildDays();
   let selection = getStoredSelection();
 
-  renderButtonBar(days, selection, (newSelection) => {
-    selection = newSelection;
+  // Guarded so this file can be `require()`d in a plain Node test
+  // environment (see test_day_filter.js) purely to unit-test the pure
+  // helper functions above (overlapsDay, hasDefinitivelyEnded,
+  // liveStatusFor) without a DOM -- `document` genuinely doesn't exist
+  // there, so this bootstrap (which only ever matters in a real browser)
+  // must not run at module-load time in that context. Browsers always
+  // have `document`, so this changes nothing about how the file actually
+  // behaves on the live site.
+  if (typeof document !== "undefined") {
+    renderButtonBar(days, selection, (newSelection) => {
+      selection = newSelection;
+      applyTableFilter(days, selection);
+      applyIndexFilter(days, selection);
+    });
+
+    refreshLiveStatus();
     applyTableFilter(days, selection);
     applyIndexFilter(days, selection);
-  });
+  }
 
-  refreshLiveStatus();
-  applyTableFilter(days, selection);
-  applyIndexFilter(days, selection);
+  // Exposed ONLY for test_day_filter.js -- never referenced by the
+  // actual site (no other file imports this), and `typeof module`
+  // is undefined in a browser, so this is a no-op there.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = { overlapsDay, hasDefinitivelyEnded, liveStatusFor, buildDays, startOfDay };
+  }
 })();
