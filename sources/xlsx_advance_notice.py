@@ -5,24 +5,86 @@ closures days before they'd appear via the API, which only reports what's
 currently signed on the road). See:
 https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/
 
-IMPORTANT: this file's exact column layout has not been verified against
-a real download (no network access was available to inspect it while
-writing this). The parser below matches column headers flexibly by
-keyword and logs exactly what it finds in every sheet, so if the guesses
-below are wrong, the build log will show the real headers to fix them
-against, and the site still builds fine from the other source(s) in the
-meantime (a parsing failure here is a warning, not a fatal error).
+IMPORTANT: this file's exact column layout HAS since been verified against
+a real download (see the header-row match for "Road number"/"Direction"/
+"Location"/"Scheduled start time"/"Scheduled end time"/"Closure details,
+including diversions" -- confirmed correct). The parser below still
+matches column headers flexibly by keyword and logs exactly what it finds
+in every sheet in case that ever changes, so if a future report restructures
+things, the build log will show the real headers to fix against, and the
+site still builds fine from the other source(s) in the meantime (a parsing
+failure here is a warning, not a fatal error).
+
+CONFIRMED LIVE BUG, now fixed: the XLSX's own download URL is NOT stable.
+National Highways mints a new hashed media path (e.g.
+/media/qsnnq4d0/7-day-closure-report.xlsx) each time they republish this
+report -- observed directly: a URL captured once kept returning a valid,
+successfully-parsing XLSX with a plausible row count indefinitely, it just
+quietly stopped being the CURRENT file, silently missing rows the live
+report page's current link did have. This wasn't visible via the source's
+🟢/🟡/🔴 status either, since the stale URL still returns 200 with real
+content -- "fetch succeeded" and "fetch got the CURRENT data" turned out
+to be different things. Fixed by discovering the real, current XLSX link
+from the report page's own HTML on every build (see discover_xlsx_url()),
+rather than trusting a URL captured once and hardcoded -- the same
+"scrape the live page, don't trust a fixed data URL" reasoning
+sources/traffic_scotland.py already uses, for the same underlying reason.
 """
 from __future__ import annotations
 
 import io
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date as date_cls
 from datetime import datetime
 
 from sources import status
+
+XLSX_FILENAME_RE = re.compile(r"7-day-closure-report\.xlsx$", re.IGNORECASE)
+
+
+def discover_xlsx_url(report_page_url: str) -> str | None:
+    """Scrape the CURRENT XLSX download link off the closure report page's
+    own HTML, since National Highways rotates the file's hashed media path
+    each time they republish it (see module docstring -- confirmed live,
+    not hypothetical). Matches by filename ("...7-day-closure-report.xlsx"),
+    not by hash, so it survives that rotation. Returns None (never raises)
+    if the page can't be fetched, beautifulsoup4 isn't installed, or no
+    matching link is found -- any of which the caller treats as "discovery
+    failed", falling back to a last-known URL if one was configured."""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        print("Warning: beautifulsoup4 is not installed -- can't discover the "
+              "current XLSX link from the report page.")
+        return None
+
+    print(f"Fetching {report_page_url} to discover the current XLSX link ...")
+    req = urllib.request.Request(report_page_url, headers={"User-Agent": "route-closures-build/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        print(f"Warning: HTTP {e.code} {e.reason} fetching the closure report page "
+              f"({report_page_url}) -- can't discover the current XLSX link.")
+        return None
+    except Exception as e:  # noqa: BLE001 -- discovery failing isn't fatal, see caller
+        print(f"Warning: failed to fetch the closure report page ({e}) -- "
+              f"can't discover the current XLSX link.")
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+    link = soup.find("a", href=XLSX_FILENAME_RE)
+    if link is None or not link.get("href"):
+        print("Warning: couldn't find a '...7-day-closure-report.xlsx' link on the "
+              "report page -- its structure may have changed.")
+        return None
+
+    resolved = urllib.parse.urljoin(report_page_url, link["href"])
+    print(f"  discovered current XLSX link: {resolved}")
+    return resolved
 
 XLSX_HEADER_SYNONYMS: dict[str, set[str]] = {
     "road_name": {"road", "roadname", "route", "roadnumber"},
@@ -106,30 +168,72 @@ def trim_trailing_empty(row: tuple) -> tuple:
     return tuple(row)
 
 
-def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
+def fetch_from_xlsx_advance_notice(
+    report_page_url: str | None = None,
+    fallback_xlsx_url: str | None = None,
+    url: str | None = None,
+) -> list[dict]:
+    """Fetches the CURRENT XLSX advance-notice report and parses it.
+
+    report_page_url (recommended): the human-facing report page --
+    discover_xlsx_url() scrapes the real, current download link from it
+    on every call, so this never goes stale even as National Highways
+    rotates the file's hashed media path (see module docstring).
+
+    fallback_xlsx_url (optional): used only if discovery from
+    report_page_url fails (page unreachable, structure changed, etc.) --
+    a safety net, not the primary path. Since National Highways rotates
+    this URL, whatever you put here WILL eventually go stale too; it's
+    there so a temporary discovery failure doesn't mean losing this
+    source's data for that build, not as a long-term substitute for
+    discovery.
+
+    url (deprecated): the OLD calling convention -- a single hardcoded
+    XLSX URL with no discovery at all. Still supported so existing
+    routes.yaml configs don't break outright, but this is exactly the
+    pattern that caused a real, confirmed-live staleness bug (see module
+    docstring) -- migrate to report_page_url instead.
+    """
+    label = "Advance Notice (XLSX)"
+
+    if report_page_url:
+        xlsx_url = discover_xlsx_url(report_page_url)
+        if xlsx_url is None:
+            if fallback_xlsx_url:
+                print(f"  falling back to the last-known XLSX URL: {fallback_xlsx_url}")
+                xlsx_url = fallback_xlsx_url
+            else:
+                status.record_status(label, ok=False, error="could not discover the current XLSX link and no fallback_xlsx_url was configured")
+                return []
+    elif url:
+        xlsx_url = url
+    else:
+        status.record_status(label, ok=False, error="neither report_page_url nor url was configured")
+        return []
+
     try:
         import openpyxl
     except ImportError:
         print("Warning: openpyxl is not installed -- skipping the XLSX "
               "advance-notice source (add it to requirements.txt).")
-        status.record_status("Advance Notice (XLSX)", ok=False, error="openpyxl not installed")
+        status.record_status(label, ok=False, error="openpyxl not installed")
         return []
 
-    print(f"Fetching {url} ...")
-    req = urllib.request.Request(url, headers={"User-Agent": "route-closures-build/1.0"})
+    print(f"Fetching {xlsx_url} ...")
+    req = urllib.request.Request(xlsx_url, headers={"User-Agent": "route-closures-build/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         print(f"Warning: XLSX fetch failed with HTTP {e.code} {e.reason} -- skipping this source.")
-        status.record_status("Advance Notice (XLSX)", ok=False, error=f"HTTP {e.code} {e.reason}")
+        status.record_status(label, ok=False, error=f"HTTP {e.code} {e.reason}")
         return []
 
     try:
         wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
     except Exception as e:  # noqa: BLE001 -- best-effort source, never fatal
         print(f"Warning: could not open the XLSX file ({e}) -- skipping this source.")
-        status.record_status("Advance Notice (XLSX)", ok=False, error=f"could not open file: {e}")
+        status.record_status(label, ok=False, error=f"could not open file: {e}")
         return []
 
     closures: list[dict] = []
@@ -180,5 +284,5 @@ def fetch_from_xlsx_advance_notice(url: str) -> list[dict]:
         print(f"  sheet '{sheet_name}': parsed {sheet_rows} closure rows")
 
     print(f"Parsed {len(closures)} total rows from the XLSX advance-notice report")
-    status.record_status("Advance Notice (XLSX)", ok=True, count=len(closures))
+    status.record_status(label, ok=True, count=len(closures))
     return closures
