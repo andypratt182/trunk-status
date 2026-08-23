@@ -71,6 +71,15 @@ before changing this.
 
 ## Known limitations
 
+- **validity_status is now computed from real dates (fixed -- was
+  hardcoded "active").** See compute_validity_status()'s own docstring
+  for the full story: this used to trust
+  timeValidityFilter="present" alone and mark every incident "active"
+  regardless of its own start/end times, an assumption never verified
+  against a live payload -- the same category of unverified assumption
+  that turned out wrong for sources/xlsx_advance_notice.py's identically
+  -hardcoded "planned" (caught live by a user). Fixed the same way that
+  was: compute "active"/"planned" from the incident's own dates.
 - **No reliable direction field.** Unlike every other source in this
   project, TomTom's incident properties don't expose a clean cardinal
   direction (N/S/E/W) for this endpoint. detect_direction() tries to
@@ -120,6 +129,8 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sources import status
 
@@ -183,6 +194,53 @@ def detect_direction(text: str) -> str:
     return f"{m.group(1).capitalize()}bound"
 
 
+def compute_validity_status(start_iso: str, end_iso: str, now: datetime) -> str:
+    """CORRECTED ASSUMPTION: every incident here used to be hardcoded
+    "active" on the reasoning that the request's timeValidityFilter=
+    "present" parameter already guarantees that. That reasoning was
+    never actually verified against a live payload (this module's own
+    "UNTESTED AGAINST A LIVE RESPONSE" caveat already flagged the risk),
+    and it's exactly the same category of unverified assumption that
+    turned out wrong for sources/xlsx_advance_notice.py's identically-
+    hardcoded "planned" -- a real closure sat stuck on the wrong status
+    for hours before a user caught it live. Since every incident here
+    already carries real start_datetime/end_datetime (see
+    normalize_incident()), there's no good reason to trust a hardcoded
+    value over just computing it properly, the same way
+    sources/traffic_scotland.py and sources/xlsx_advance_notice.py both
+    already do (duplicated here rather than imported, matching this
+    project's no-cross-imports-between-sources pattern).
+
+    "active" only while `now` genuinely falls within [start, end],
+    "planned" otherwise. If `end` is missing/unparseable but `start`
+    isn't, compares against `start` alone (active once begun). Falls
+    back to "active" -- not "planned" -- only when even `start` is
+    missing/unparseable, since TomTom's timeValidityFilter="present"
+    still means SOMETHING real about this specific incident even
+    without parseable dates to check it against; unlike XLSX's advance-
+    notice report (where an unparseable date leaves nothing to safely
+    assume), a dateless TomTom incident is still one TomTom itself is
+    presenting as currently live right now."""
+    start = None
+    end = None
+    if start_iso:
+        try:
+            start = datetime.fromisoformat(start_iso)
+        except ValueError:
+            start = None
+    if end_iso:
+        try:
+            end = datetime.fromisoformat(end_iso)
+        except ValueError:
+            end = None
+
+    if start and end:
+        return "active" if start <= now <= end else "planned"
+    if start:
+        return "active" if now >= start else "planned"
+    return "active"
+
+
 def fetch_page(bbox: str, category_filter: str, api_key: str) -> dict:
     params = {
         "key": api_key,
@@ -201,14 +259,19 @@ def fetch_page(bbox: str, category_filter: str, api_key: str) -> dict:
         return json.load(resp)
 
 
-def normalize_incident(feature: dict, target_road: str) -> dict | None:
+def normalize_incident(feature: dict, target_road: str, now: datetime | None = None) -> dict | None:
     """Flatten one raw TomTom incident feature into the common flat
     record shape, or None if it doesn't mention target_road in its own
-    roadNumbers list."""
+    roadNumbers list. now defaults to the real current Europe/London
+    time if not given (a fixed value can be passed for testing) -- see
+    compute_validity_status()."""
     props = feature.get("properties", {}) or {}
     road_numbers = {(r or "").upper() for r in (props.get("roadNumbers") or [])}
     if target_road.upper() not in road_numbers:
         return None
+
+    if now is None:
+        now = datetime.now(ZoneInfo("Europe/London")).replace(tzinfo=None)
 
     events = props.get("events") or []
     # dict.fromkeys() dedupes while preserving order -- TomTom sometimes
@@ -237,15 +300,18 @@ def normalize_incident(feature: dict, target_road: str) -> dict | None:
         coords = feature.get("geometry", {}).get("coordinates")
         incident_id = f"{coords}-{props.get('startTime', '')}"
 
+    start_iso = clean_iso(props.get("startTime"))
+    end_iso = clean_iso(props.get("endTime"))
+
     return {
         "record_id": f"tomtom-{incident_id}",
         "road_name": target_road,
         "direction": direction,
         "location_description": location_description,
         "comment": cause_type,
-        "start_datetime": clean_iso(props.get("startTime")),
-        "end_datetime": clean_iso(props.get("endTime")),
-        "validity_status": "active",
+        "start_datetime": start_iso,
+        "end_datetime": end_iso,
+        "validity_status": compute_validity_status(start_iso, end_iso, now),
         "cause_type": cause_type,
         "lanes_restricted": None,
         "lanes_operational": None,
