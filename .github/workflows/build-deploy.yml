@@ -37,8 +37,25 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up Node (for test_day_filter.js only)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # Runs BEFORE the actual site build, deliberately -- fail fast on a
+      # broken change rather than building/deploying a site whose
+      # underlying logic tests confirm is wrong. Neither test file needs
+      # the real site built first: both call the actual project code
+      # (matching.py, sources/*.py, day-filter.js) directly against their
+      # own fixtures.
+      - name: Run Python test suite
+        run: python test_build.py
+
+      - name: Run day-filter.js test suite
+        run: node test_day_filter.js
 
       - name: Build site
         run: python build.py
