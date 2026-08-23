@@ -868,7 +868,7 @@ _original_xlsx_urlopen = _xlsx_urllib_request.urlopen
 source_status.reset()
 _xlsx_urllib_request.urlopen = lambda req, timeout=60: _FakeXlsxResp(_xlsx_bytes)
 try:
-    _xlsx_results = xlsx.fetch_from_xlsx_advance_notice("https://example.com/report.xlsx")
+    _xlsx_results = xlsx.fetch_from_xlsx_advance_notice(url="https://example.com/report.xlsx")
 finally:
     _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
 
@@ -885,7 +885,7 @@ _xlsx_urllib_request.urlopen = lambda req, timeout=60: (_ for _ in ()).throw(
     _urllib_error.HTTPError("https://example.com/report.xlsx", 404, "Not Found", {}, None)
 )
 try:
-    _xlsx_fail_results = xlsx.fetch_from_xlsx_advance_notice("https://example.com/report.xlsx")
+    _xlsx_fail_results = xlsx.fetch_from_xlsx_advance_notice(url="https://example.com/report.xlsx")
 finally:
     _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
 
@@ -895,6 +895,82 @@ check(
     "a genuine HTTP failure records 'failed' (red), NOT 'ok_no_results' (amber) -- "
     "this is the exact distinction the whole status feature exists to get right",
     _xlsx_fail_statuses[0]["state"] == "failed" and "404" in _xlsx_fail_statuses[0]["error"],
+)
+
+source_status.reset()
+
+section("xlsx_advance_notice: discover_xlsx_url (report_page_url -- the fix for the confirmed-live stale-URL bug)")
+
+_xlsx_report_page_html = '''
+<html><body>
+<a href="/media/qsnnq4d0/7-day-closure-report.xlsx">Roadworks status XLSX 178Kb</a>
+</body></html>
+'''
+_xlsx_urllib_request.urlopen = lambda req, timeout=60: _FakeXlsxResp(_xlsx_report_page_html.encode("utf-8"))
+try:
+    _discovered = xlsx.discover_xlsx_url("https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/")
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+check(
+    "the current XLSX link is discovered from the report page's real HTML shape "
+    "and resolved to an absolute URL (the real link is relative)",
+    _discovered == "https://nationalhighways.co.uk/media/qsnnq4d0/7-day-closure-report.xlsx",
+)
+
+_xlsx_report_page_no_link_html = '<html><body>no relevant link here</body></html>'
+_xlsx_urllib_request.urlopen = lambda req, timeout=60: _FakeXlsxResp(_xlsx_report_page_no_link_html.encode("utf-8"))
+try:
+    _discovered_missing = xlsx.discover_xlsx_url("https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/")
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+check("discovery returns None (not an exception) when no matching link is found", _discovered_missing is None)
+
+section("xlsx_advance_notice: fetch_from_xlsx_advance_notice(report_page_url=...) end-to-end")
+
+source_status.reset()
+
+
+def _fake_urlopen_report_then_xlsx(req, timeout=60):
+    if req.full_url.endswith(".xlsx"):
+        return _FakeXlsxResp(_xlsx_bytes)
+    return _FakeXlsxResp(_xlsx_report_page_html.encode("utf-8"))
+
+
+_xlsx_urllib_request.urlopen = _fake_urlopen_report_then_xlsx
+try:
+    _xlsx_discovery_results = xlsx.fetch_from_xlsx_advance_notice(
+        report_page_url="https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/",
+        fallback_xlsx_url="https://example.com/old-stale-url.xlsx",  # should NOT be used -- discovery succeeds
+    )
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+check(
+    "report_page_url path: discovers the real link, fetches THAT (not the fallback), "
+    "and parses it correctly end-to-end",
+    len(_xlsx_discovery_results) == 1,
+)
+
+source_status.reset()
+
+
+def _fake_urlopen_report_fails_falls_back(req, timeout=60):
+    if req.full_url.endswith(".xlsx"):
+        return _FakeXlsxResp(_xlsx_bytes)
+    raise _urllib_error.HTTPError(req.full_url, 500, "Internal Server Error", {}, None)
+
+
+_xlsx_urllib_request.urlopen = _fake_urlopen_report_fails_falls_back
+try:
+    _xlsx_fallback_results = xlsx.fetch_from_xlsx_advance_notice(
+        report_page_url="https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/",
+        fallback_xlsx_url="https://example.com/fallback.xlsx",
+    )
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+check(
+    "when discovery fails (report page unreachable here), the fallback_xlsx_url "
+    "is used instead of giving up entirely",
+    len(_xlsx_fallback_results) == 1,
 )
 
 source_status.reset()

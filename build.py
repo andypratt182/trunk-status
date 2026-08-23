@@ -102,7 +102,11 @@ def load_additional_closures(site_cfg: dict) -> list[dict]:
         source_type = source.get("type")
         if source_type == "xlsx_advance_notice":
             try:
-                extra.extend(fetch_from_xlsx_advance_notice(source["url"]))
+                extra.extend(fetch_from_xlsx_advance_notice(
+                    report_page_url=source.get("report_page_url"),
+                    fallback_xlsx_url=source.get("fallback_xlsx_url"),
+                    url=source.get("url"),  # deprecated -- see xlsx_advance_notice.py docstring
+                ))
             except Exception as e:  # noqa: BLE001 -- additional sources are best-effort
                 print(f"Warning: additional source '{source_type}' failed ({e}) -- "
                       f"continuing without it.")

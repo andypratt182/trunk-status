@@ -51,8 +51,25 @@ site:
     # to 7 days ahead, published before the API would show them (the API
     # only reports closures once VSS signs are actively set). Rows show
     # as "Advance notice (full closure)" in the site's Source column.
+    #
+    # report_page_url: the human-facing report page -- the actual XLSX
+    # download link is discovered fresh from THIS page's HTML on every
+    # build (see discover_xlsx_url() in sources/xlsx_advance_notice.py),
+    # rather than a hardcoded file URL. This matters: National Highways
+    # mints a NEW hashed media path (e.g. /media/qsnnq4d0/...) each time
+    # they republish the report -- confirmed live, a previously-hardcoded
+    # URL kept returning a valid, successfully-parsing XLSX indefinitely,
+    # it just silently stopped being the CURRENT file (missing rows the
+    # live page's current link did have), with no error or red status to
+    # flag it. Don't go back to a hardcoded `url:` here for that reason.
+    #
+    # fallback_xlsx_url: only used if discovering the current link from
+    # report_page_url fails for some reason (safety net, not primary --
+    # see the module docstring for why this will eventually go stale
+    # too, same as the old hardcoded url: did).
     - type: "xlsx_advance_notice"
-      url: "https://nationalhighways.co.uk/media/1dgh4t0q/7-day-closure-report.xlsx"
+      report_page_url: "https://nationalhighways.co.uk/roads-and-travel/live-travel-updates/road-closure-report/"
+      fallback_xlsx_url: "https://nationalhighways.co.uk/media/1dgh4t0q/7-day-closure-report.xlsx"
 
     # Traffic Scotland: scraped (no self-service API available -- see
     # build.py's comments above fetch_from_traffic_scotland for why).
