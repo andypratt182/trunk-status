@@ -39,6 +39,7 @@ import urllib.parse
 import urllib.request
 from datetime import date as date_cls
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from sources import status
 
@@ -134,6 +135,49 @@ def to_iso_datetime(value) -> str:
     if isinstance(value, (datetime, date_cls)):
         return value.isoformat()
     return str(value).strip()
+
+
+def compute_validity_status(start_iso: str, end_iso: str, now: datetime) -> str:
+    """CONFIRMED LIVE BUG, now fixed: this report has no "status" column of
+    its own (see the real header dump this project checked against --
+    Road number/Direction/Location/Scheduled start/end/Closure details,
+    no status field at all), so every row here used to be hardcoded to
+    "planned" permanently -- including hours after a closure had actually
+    started. A user directly confirmed this: an M6 J39-40 closure showed
+    "Planned" on the site at 02:29 while genuinely inside its own
+    22:00-06:00 window, with National Highways' own app showing the
+    corresponding entry as "Active" at the same moment.
+
+    Fixed the same way sources/traffic_scotland.py already solves the
+    identical problem for its own data (duplicated here rather than
+    imported, matching this project's pattern of no cross-imports
+    between source modules -- see e.g. tomtom_incidents.py's clean_iso
+    for the same reasoning): 'active' only while `now` genuinely falls
+    within [start, end], 'planned' otherwise. If `end` is missing/
+    unparseable but `start` isn't, compare against `start` alone (active
+    once begun). Falls back to 'planned' only when even `start` is
+    missing/unparseable, since there's nothing real left to compare
+    against -- this report is exclusively advance NOTICE, so an entry
+    with no parseable start time was never going to be safely assumed
+    active regardless."""
+    start = None
+    end = None
+    if start_iso:
+        try:
+            start = datetime.fromisoformat(start_iso)
+        except ValueError:
+            start = None
+    if end_iso:
+        try:
+            end = datetime.fromisoformat(end_iso)
+        except ValueError:
+            end = None
+
+    if start and end:
+        return "active" if start <= now <= end else "planned"
+    if start:
+        return "active" if now >= start else "planned"
+    return "planned"
 
 
 def find_header_row(rows: list[tuple]) -> tuple[int, dict[str, int]] | tuple[None, None]:
@@ -261,21 +305,31 @@ def fetch_from_xlsx_advance_notice(
             return row[idx] if idx is not None and idx < len(row) else None
 
         sheet_rows = 0
+        now = datetime.now(ZoneInfo("Europe/London")).replace(tzinfo=None)
         for row in rows[header_idx + 1:]:
             road_name = get(row, "road_name")
             if not road_name:
                 continue
             row_counter += 1
             sheet_rows += 1
+            start_iso = to_iso_datetime(get(row, "start_datetime"))
+            end_iso = to_iso_datetime(get(row, "end_datetime"))
+            # This report has no "status" column of its own (see real
+            # headers this project confirmed against) -- always computed
+            # from the real start/end window now, never a hardcoded
+            # "planned" (see compute_validity_status()'s docstring for
+            # the confirmed-live bug this replaced).
+            explicit_status = str(get(row, "validity_status") or "").strip().lower()
+            validity_status = explicit_status or compute_validity_status(start_iso, end_iso, now)
             closures.append({
                 "record_id": f"xlsx-{sheet_name}-{row_counter}",
                 "road_name": str(road_name).strip(),
                 "direction": str(get(row, "direction") or "").strip(),
                 "location_description": str(get(row, "location_description") or "").strip(),
                 "comment": str(get(row, "comment") or "").strip(),
-                "start_datetime": to_iso_datetime(get(row, "start_datetime")),
-                "end_datetime": to_iso_datetime(get(row, "end_datetime")),
-                "validity_status": str(get(row, "validity_status") or "planned").strip().lower() or "planned",
+                "start_datetime": start_iso,
+                "end_datetime": end_iso,
+                "validity_status": validity_status,
                 "cause_type": "advanceNoticeFullClosure",
                 "lanes_restricted": None,
                 "lanes_operational": 0,  # this report is full closures only
