@@ -391,6 +391,31 @@ check(
     "M6 itself has no configured continuation -- an out-of-range M6 junction is shown plainly",
     matching.label_junction_for_display("M6", 100, 26, 45) == "J100",
 )
+check(
+    "REGRESSION GUARD: a junction BELOW this leg's lower bound is shown plainly, "
+    "NOT labeled with the continuation road -- this is the exact bug a user caught "
+    "live, a real M74 J6-J8 closure showing as 'M74(S) M6 J6 - J8' because this "
+    "route's M74 leg happens to be configured starting at J8 (where THIS route "
+    "joins the M74, not where the real motorway starts at J1)",
+    matching.label_junction_for_display("M74", 6, 8, 22) == "J6",
+)
+
+_real_m74_j6_to_j8 = {
+    "road_name": "M74", "direction": "Southbound",
+    "location_description": "M74 Jct 6 -Jct 8 SB - Road Closure",
+    "comment": "Diversion: Traffic will depart from M74 at Junction 6 towards Hamilton...",
+    "cause_type": "Third Party Works", "lane_info": "Road Closure.",
+    "start_datetime": "2026-10-01T22:00:00", "end_datetime": "2026-10-02T06:00:00",
+    "validity_status": "planned", "source_label": "Traffic Scotland (scraped)",
+}
+_m74_j6_j8_rows = matching.rows_for_leg([_real_m74_j6_to_j8], "M74", "southBound", 8, 22)
+check("one row produced for the real J6-J8 case", len(_m74_j6_j8_rows) == 1)
+check(
+    "REGRESSION GUARD: shows the real 'M74(S) J6-J8', not the buggy 'M74(S) M6 J6 - J8' "
+    "the live site actually showed -- both junctions are real M74 junctions, neither "
+    "belongs to the M6 continuation",
+    _m74_j6_j8_rows[0]["location"] == "M74(S) J6-J8",
+)
 
 _real_m74_switch_to_m6 = {
     "road_name": "M74", "direction": "Southbound",
@@ -924,6 +949,87 @@ try:
 finally:
     _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
 check("discovery returns None (not an exception) when no matching link is found", _discovered_missing is None)
+
+section("xlsx_advance_notice: compute_validity_status (the confirmed-live 'stuck on Planned' bug, now fixed)")
+
+from datetime import datetime as _xlsx_dt
+
+_xlsx_now = _xlsx_dt(2026, 8, 23, 2, 29)  # matches the real report -- user confirmed this exact moment
+
+check(
+    "REGRESSION GUARD: a closure whose window genuinely includes `now` computes "
+    "'active', not the old hardcoded 'planned' -- this is the exact real-world case "
+    "a user caught live (M6 J39-40, 22:00-06:00, checked at 02:29 mid-window)",
+    xlsx.compute_validity_status("2026-08-22T22:00:00", "2026-08-23T06:00:00", _xlsx_now) == "active",
+)
+check(
+    "a closure whose window hasn't started yet computes 'planned'",
+    xlsx.compute_validity_status("2026-08-23T22:00:00", "2026-08-24T06:00:00", _xlsx_now) == "planned",
+)
+check(
+    "a closure whose window has already fully ended computes 'planned' (not 'active') "
+    "-- exact end-of-life boundary, not just the mid-window case",
+    xlsx.compute_validity_status("2026-08-20T22:00:00", "2026-08-21T06:00:00", _xlsx_now) == "planned",
+)
+check(
+    "with no end time at all, 'active' once start has passed, based on start alone",
+    xlsx.compute_validity_status("2026-08-22T22:00:00", "", _xlsx_now) == "active",
+)
+check(
+    "with no end time and start still in the future, 'planned'",
+    xlsx.compute_validity_status("2026-08-24T22:00:00", "", _xlsx_now) == "planned",
+)
+check(
+    "with no parseable start time at all, falls back to 'planned' rather than "
+    "guessing -- this report is advance NOTICE only, nothing safe to assume active",
+    xlsx.compute_validity_status("", "", _xlsx_now) == "planned",
+)
+
+section("xlsx_advance_notice: end-to-end, a currently-active window computes 'active' through the REAL parser (not just the helper function in isolation)")
+
+from datetime import timedelta as _xlsx_timedelta
+from zoneinfo import ZoneInfo as _xlsx_ZoneInfo
+
+_xlsx_now_real = _xlsx_dt.now(_xlsx_ZoneInfo("Europe/London")).replace(tzinfo=None)
+_wb_active = _openpyxl.Workbook()
+_ws_active = _wb_active.active
+_ws_active.append(("Road Number", "Direction", "Location", "Scheduled Start Time",
+                    "Scheduled End Time", "Closure Details Including Diversions"))
+_ws_active.append((
+    "M6", "Northbound", "M6 Northbound Jct 39 to 40 Carriageway closure",
+    _xlsx_now_real - _xlsx_timedelta(hours=2), _xlsx_now_real + _xlsx_timedelta(hours=2),
+    "Overall Scheme Details: structural maintenance work",
+))
+_ws_active.append((
+    "M6", "Northbound", "M6 Northbound Jct 10 to 11 Carriageway closure",
+    _xlsx_now_real + _xlsx_timedelta(days=2), _xlsx_now_real + _xlsx_timedelta(days=2, hours=8),
+    "A different, not-yet-started closure",
+))
+_xlsx_active_bytes = _io.BytesIO()
+_wb_active.save(_xlsx_active_bytes)
+_xlsx_active_bytes = _xlsx_active_bytes.getvalue()
+
+_xlsx_urllib_request.urlopen = lambda req, timeout=60: _FakeXlsxResp(_xlsx_active_bytes)
+try:
+    _xlsx_active_results = xlsx.fetch_from_xlsx_advance_notice(url="https://example.com/report.xlsx")
+finally:
+    _xlsx_urllib_request.urlopen = _original_xlsx_urlopen
+
+_xlsx_active_row = next(r for r in _xlsx_active_results if "39" in r["location_description"])
+_xlsx_planned_row = next(r for r in _xlsx_active_results if "10" in r["location_description"])
+check(
+    "REGRESSION GUARD: a row whose window genuinely spans right now comes out of the "
+    "REAL end-to-end parser as 'active', not stuck on 'planned' -- this is the exact "
+    "bug a user caught live",
+    _xlsx_active_row["validity_status"] == "active",
+)
+check(
+    "a different row that hasn't started yet correctly still comes out as 'planned' "
+    "-- this isn't just defaulting everything to 'active' now",
+    _xlsx_planned_row["validity_status"] == "planned",
+)
+
+source_status.reset()
 
 section("xlsx_advance_notice: fetch_from_xlsx_advance_notice(report_page_url=...) end-to-end")
 
@@ -2416,6 +2522,71 @@ check(
 check(
     "duplicate identical event descriptions are deduped, not repeated",
     _r3["cause_type"] == "Road closed",
+)
+
+section("tomtom_incidents: compute_validity_status (REGRESSION GUARD -- was hardcoded 'active' regardless of dates, same risk category as the XLSX bug)")
+
+_tti_now = _dt(2026, 8, 23, 2, 29)
+
+check(
+    "a window genuinely including `now` computes 'active'",
+    tti.compute_validity_status("2026-08-22T22:00:00", "2026-08-23T06:00:00", _tti_now) == "active",
+)
+check(
+    "a window that hasn't started yet computes 'planned', NOT the old hardcoded "
+    "'active' -- this is the exact fix",
+    tti.compute_validity_status("2026-08-24T22:00:00", "2026-08-25T06:00:00", _tti_now) == "planned",
+)
+check(
+    "a window that's already fully ended computes 'planned', not 'active'",
+    tti.compute_validity_status("2026-08-20T22:00:00", "2026-08-21T06:00:00", _tti_now) == "planned",
+)
+check(
+    "no end time, start already passed -> 'active' based on start alone",
+    tti.compute_validity_status("2026-08-22T22:00:00", "", _tti_now) == "active",
+)
+check(
+    "no end time, start still in the future -> 'planned'",
+    tti.compute_validity_status("2026-08-24T22:00:00", "", _tti_now) == "planned",
+)
+check(
+    "no parseable dates at all -> falls back to 'active', NOT 'planned' -- unlike "
+    "XLSX's advance-notice report, TomTom's timeValidityFilter='present' still means "
+    "something real about this specific incident even without dates to verify it "
+    "against (see compute_validity_status()'s docstring for why this differs "
+    "from xlsx_advance_notice.py's equivalent fallback)",
+    tti.compute_validity_status("", "", _tti_now) == "active",
+)
+
+section("tomtom_incidents: normalize_incident end-to-end with an explicit `now` (deterministic)")
+
+_tti_planned_feature = {
+    "type": "Feature",
+    "geometry": {"type": "Point", "coordinates": [-2.5, 53.4]},
+    "properties": {
+        "id": "future1",
+        "events": [{"description": "Road closed"}],
+        "startTime": "2026-08-24T22:00:00Z",
+        "endTime": "2026-08-25T06:00:00Z",
+        "from": "M6 J20", "to": "M6 J21", "roadNumbers": ["M6"],
+    },
+}
+_tti_active_result = tti.normalize_incident(_tti_feature_m6_no_direction, "M6", now=_tti_now)
+_tti_planned_result = tti.normalize_incident(_tti_planned_feature, "M6", now=_tti_now)
+check(
+    "an incident whose window already covers `now` comes out 'active'",
+    _tti_active_result["validity_status"] == "active",
+)
+check(
+    "REGRESSION GUARD: an incident scheduled for the future comes out 'planned' "
+    "through the real normalize_incident() call, not hardcoded 'active' regardless "
+    "of its own dates",
+    _tti_planned_result["validity_status"] == "planned",
+)
+check(
+    "when `now` isn't passed at all, normalize_incident() still works (defaults to "
+    "the real current time) rather than requiring every caller to supply one",
+    tti.normalize_incident(_tti_feature_m6_no_direction, "M6")["validity_status"] in ("active", "planned"),
 )
 
 section("tomtom_incidents: junction matching works via shared matching.py logic")
