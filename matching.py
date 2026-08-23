@@ -400,34 +400,57 @@ def extract_junction_to_place(text: str) -> tuple[str, str] | None:
 
 # Known road continuations within THIS PROJECT's own configured routes
 # -- M74 Southbound becomes M6 Southbound (both Axis and Omega configure
-# this same M74->M6 sequence). A junction number outside this leg's own
-# configured range likely belongs to the continuing road, not this one
-# -- real case: Traffic Scotland's raw M74 text "J22 - J45" is really
-# describing a closure spanning from M74's own J22 all the way onto the
-# M6's J45, which doesn't exist as an M74 junction at all (M74 tops out
-# around J22 in this project's own configuration). This is deliberately
-# hardcoded to this ONE specific continuation this project's own routes
-# actually use -- there's no way to derive "M74 continues into M6" from
-# the text itself; it's real-world road topology knowledge that has to
-# come from somewhere, and routes.yaml's own configured leg ranges are
-# the only source of that knowledge already available here. If the
-# route configuration ever adds a different road that also connects to
-# M74, or removes this M74->M6 sequence, this mapping needs updating by
-# hand to match -- it will not automatically infer a different
-# continuation from routes.yaml, only use the leg's own j_from/j_to
-# bounds to decide whether a junction is in- or out-of-range.
+# this same M74->M6 sequence). A junction number ABOVE this leg's own
+# configured upper bound likely belongs to the continuing road, not this
+# one -- real case: Traffic Scotland's raw M74 text "J22 - J45" is
+# really describing a closure spanning from M74's own J22 all the way
+# onto the M6's J45, which doesn't exist as an M74 junction at all (M74
+# tops out around J22 in this project's own configuration). Deliberately
+# ONE-DIRECTIONAL (too-high only, not too-low too -- see
+# label_junction_for_display()'s docstring for the confirmed-live bug
+# this fixed): M74's real numbering starts at J1, so a junction number
+# BELOW this leg's configured lower bound is still almost certainly a
+# legitimate M74 junction the route's own configured slice just doesn't
+# happen to cover -- not a sign it belongs to a different road. This is
+# deliberately hardcoded to this ONE specific continuation this
+# project's own routes actually use -- there's no way to derive "M74
+# continues into M6" from the text itself; it's real-world road
+# topology knowledge that has to come from somewhere, and routes.yaml's
+# own configured leg ranges are the only source of that knowledge
+# already available here. If the route configuration ever adds a
+# different road that also connects to M74, or removes this M74->M6
+# sequence, this mapping needs updating by hand to match -- it will not
+# automatically infer a different continuation from routes.yaml, only
+# use the leg's own j_from/j_to bounds to decide whether a junction is
+# above that upper bound.
 _KNOWN_ROAD_CONTINUATIONS = {"M74": "M6"}
 
 
 def label_junction_for_display(road_name: str, junction: int,
                                 j_from: int | None, j_to: int | None) -> str:
     """Format one junction number for display, prefixing it with a
-    known continuing road's name if it falls outside this leg's own
-    configured range -- see the comment on _KNOWN_ROAD_CONTINUATIONS for
-    why, and why this is deliberately narrow rather than general."""
+    known continuing road's name if it's ABOVE this leg's own configured
+    upper bound -- see the comment on _KNOWN_ROAD_CONTINUATIONS for why,
+    and why this is deliberately narrow rather than general.
+
+    CONFIRMED LIVE BUG, now fixed: this used to trigger on ANY
+    out-of-range junction, in either direction -- a real M74 closure at
+    J6-J8 (both real, legitimate M74 junctions) was showing as
+    "M74(S) M6 J6-J8" on the live site, because this route's own M74 leg
+    happens to be configured starting at J8 (that's just where THIS
+    route joins the M74, not where the real motorway starts), so J6 fell
+    "below range" and got wrongly labeled as if it belonged to the M6
+    continuation instead. But M74's real numbering starts at J1 -- a
+    too-LOW junction is still almost certainly a legitimate M74 junction
+    the route's own configured slice just doesn't happen to cover, while
+    a too-HIGH junction (e.g. J45, which exceeds M74's real ~22-junction
+    span entirely) genuinely can't be an M74 junction at all and DOES
+    need the continuation label. Only the "too high" direction should
+    ever trigger this, which is what junction > hi (rather than the
+    previous not (lo <= junction <= hi)) now checks."""
     if j_from is not None and j_to is not None:
         lo, hi = sorted((j_from, j_to))
-        if not (lo <= junction <= hi):
+        if junction > hi:
             continuation = _KNOWN_ROAD_CONTINUATIONS.get(road_name.upper())
             if continuation:
                 return f"{continuation} J{junction}"
