@@ -71,7 +71,7 @@
         #}
         {% for row in leg.rows %}
         <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}" data-source="{{ row.source_label }}">
-          <td data-label="Status"><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span></td>
+          <td data-label="Status"><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span><span class="status-dot status-dot-after"></span></td>
           <td class="icon-cell" data-label="Type"><img class="row-icon" src="static/logos/{{ row.icon }}" alt="" width="20" height="20"></td>
           <td class="location-cell" data-label="Location">
             {{ row.location }}
