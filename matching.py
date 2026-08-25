@@ -518,6 +518,58 @@ def format_location(road_name: str, direction_letter: str, junctions: list[int],
     return text
 
 
+# National Highways' own API appears to count the hard shoulder as a
+# regular running lane in its lane totals on TRADITIONAL motorway
+# sections (a real hard shoulder that isn't normally driven on) --
+# confirmed directly by the person maintaining this project, who has
+# first-hand knowledge of which stretches are genuine All Lane Running
+# (ALR, where the hard shoulder IS a permanent running lane and the raw
+# count is accurate) versus traditional sections (where it isn't, so a
+# real 1-lane closure on a 3-lane-plus-hard-shoulder stretch shows as
+# "1 restricted / 3 open" when only 2 of those "open" lanes are lanes a
+# driver would actually use). Deliberately road-specific and manually
+# curated -- there's no way to derive this from the closure data itself,
+# it's real-world road engineering knowledge that has to come from
+# somewhere. M74 deliberately excluded per explicit instruction --
+# Traffic Scotland's own sources are different and this hasn't been
+# confirmed to apply there; don't add Scotland roads here without that
+# same direct confirmation.
+ALR_SECTIONS: dict[str, list[tuple[int, int]]] = {
+    "M6": [(21, 26)],
+}
+
+
+def is_within_alr_section(road_name: str, junctions: list[int]) -> bool:
+    """True only if every extracted junction genuinely falls within a
+    known All Lane Running section for this road (see ALR_SECTIONS).
+    No extractable junctions at all defaults to False (apply the hard-
+    shoulder correction downstream) -- the ALR sections defined above
+    are a narrow minority of these roads' overall length, so an
+    unlocated closure is more likely to be on a traditional stretch
+    than not."""
+    ranges = ALR_SECTIONS.get((road_name or "").upper())
+    if not ranges or not junctions:
+        return False
+    return all(any(lo <= j <= hi for lo, hi in ranges) for j in junctions)
+
+
+def has_hard_shoulder_lane_count_quirk(road_name: str) -> bool:
+    """True only for roads EXPLICITLY confirmed to have this quirk in
+    National Highways' own lane-count data -- currently just M6 (the
+    same set of roads that have an ALR_SECTIONS entry, though this is
+    checked separately from is_within_alr_section() itself: a road with
+    NO known quirk at all -- M57/M58/M62, or M74, explicitly excluded
+    per instruction since Traffic Scotland's own sources are different
+    and unconfirmed -- must NEVER get the lanes_operational correction,
+    not even a fallback "no junctions -> assume not ALR" case. Without
+    this separate check, is_within_alr_section() alone would return
+    False for every one of those roads too (they have no ALR_SECTIONS
+    entry), which would have wrongly applied the correction to roads
+    this was never confirmed for -- a real bug caught by this project's
+    own M74 test case."""
+    return (road_name or "").upper() in ALR_SECTIONS
+
+
 def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
                   j_from: int | None, j_to: int | None) -> list[dict]:
     matches = [
@@ -609,6 +661,21 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
         extra_detail = raw_location if raw_location and raw_location != raw_comment else ""
         combined_comment = " \u2014 ".join(p for p in (extra_detail, raw_comment) if p)
 
+        # Hard-shoulder correction -- see ALR_SECTIONS/is_within_alr_section()
+        # above. Only ever touches lanes_operational (the "still open"
+        # count) -- lanes_restricted is left exactly as reported, since
+        # the hard shoulder isn't something National Highways would ever
+        # report as "restricted"; it's just not a real running lane to
+        # begin with outside a genuine ALR section.
+        lanes_operational_display = c.get("lanes_operational")
+        if (
+            resolved_road
+            and lanes_operational_display is not None
+            and has_hard_shoulder_lane_count_quirk(resolved_road)
+            and not is_within_alr_section(resolved_road, all_junctions)
+        ):
+            lanes_operational_display = max(0, lanes_operational_display - 1)
+
         row = {
             "location": location_text,
             "comment": combined_comment,
@@ -618,7 +685,7 @@ def rows_for_leg(closures: list[dict], road_name: str, data_direction: str,
             "end_iso": c.get("end_datetime") or "",
             "status": (c.get("validity_status") or "unknown").lower(),
             "lanes_restricted": c.get("lanes_restricted"),
-            "lanes_operational": c.get("lanes_operational"),
+            "lanes_operational": lanes_operational_display,
             "lane_info": c.get("lane_info") or "",
             "cause": humanize_cause(c.get("cause_type") or ""),
             "source_label": c.get("source_label") or "",
