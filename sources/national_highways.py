@@ -293,6 +293,23 @@ def fetch_from_national_highways_api(site_cfg: dict) -> list[dict]:
             for cause_type, count in cause_counts.most_common():
                 print(f"    {count:5d}x  {cause_type!r}")
 
+        # Per-road counts for this project's own tracked roads specifically
+        # -- added after a real "did these disappear, or is something
+        # broken?" question about M58 couldn't be answered from this log at
+        # all: every OTHER source already logs its own "N match <road>" per
+        # road, but the primary API only ever logged one big national
+        # total, with no way to tell whether a specific tracked road had
+        # ANY records in that batch. This doesn't replace checking the
+        # live app directly (a road showing 0 here could still mean
+        # National Highways itself has nothing right now, which this log
+        # alone can't distinguish from "gone" vs "never was there") --
+        # it just closes the specific gap where THIS log couldn't even
+        # rule out our own fetch/parsing as the cause.
+        tracked_roads = ("M6", "M57", "M58", "M62", "M74")
+        for road in tracked_roads:
+            road_matches = [c for c in closures if (c.get("road_name") or "").upper() == road]
+            print(f"  {len(road_matches)} match {road}")
+
     if not closures:
         print("Warning: 0 records parsed. If this is unexpected, the API's "
               "response shape may differ from what this script expects -- "
