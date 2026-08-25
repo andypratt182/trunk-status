@@ -10,10 +10,10 @@ build.py's own dispatch loop can't tell "the fetch genuinely failed"
 apart from "the fetch worked fine and found nothing" just by looking at
 the returned list -- both look like []. Several of these sources are
 SUPPOSED to often return 0 results (Travel Alerts typically has only
-2-3 entries covering the whole English network at any moment; TomTom
-and the NH beta search can both be legitimately quiet), so a status
-indicator that just checked "len(results) == 0 -> red" would be
-permanently, misleadingly red on ordinary working days.
+2-3 entries covering the whole English network at any moment; the NH
+beta search can also be legitimately quiet), so a status indicator that
+just checked "len(results) == 0 -> red" would be permanently,
+misleadingly red on ordinary working days.
 
 This module gives each source a side channel to report what it already
 knows at the exact point it decides its own outcome -- inside its own
@@ -22,18 +22,22 @@ has. It adds no new control flow and changes no function's return type
 or call signature, so it doesn't touch any existing call site or test
 assertion that checks a fetch_from_X() return value.
 
-SCOPE: deliberately covers only the additional/optional sources
-(site.additional_sources in routes.yaml), not the primary source
-(site.source). A primary-source failure already raises SystemExit and
-stops the whole build outright (see sources/national_highways.py) --
-no page is produced in that case, so there's nothing for a status badge
-ON that (non-existent) page to show; that failure is already visible
-via the GitHub Actions run itself failing.
+SCOPE: covers the additional/optional sources (site.additional_sources
+in routes.yaml) AND the primary source (site.source) -- the primary
+source used to be an exception (a failure there raised SystemExit and
+stopped the whole build outright, so there was never a page for a
+status badge to appear on), but that was changed: a primary-source
+failure now reports through this same registry, under a
+"Primary Source (...)"-prefixed label, AND triggers a separate,
+page-level warning banner shown on every page (not just this status
+panel) -- see sources/national_highways.py's PrimarySourceError
+docstring and build.py's main() for why a quiet status-panel entry
+alone isn't enough for that specific failure.
 
 LAST-BUILD ONLY, not historical: module-level state, reset once at the
 start of each build via reset() (same convention already used for
-sources/tomtom_incidents.py's _response_cache/_warned_missing_key --
-process-lifetime state, not persisted between builds). This shows
+sources/scotland_incidents.py's _page_cache -- process-lifetime state,
+not persisted between builds). This shows
 "how did the last build go", not a trend over time -- see the README's
 "Data Sources status" section for why that's a deliberate scope choice,
 not an oversight.

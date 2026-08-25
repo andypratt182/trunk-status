@@ -151,8 +151,8 @@ def compute_validity_status(start_iso: str, end_iso: str, now: datetime) -> str:
     Fixed the same way sources/traffic_scotland.py already solves the
     identical problem for its own data (duplicated here rather than
     imported, matching this project's pattern of no cross-imports
-    between source modules -- see e.g. tomtom_incidents.py's clean_iso
-    for the same reasoning): 'active' only while `now` genuinely falls
+    between source modules -- see e.g. national_highways_traffic_search.py's
+    clean_iso for the same reasoning): 'active' only while `now` genuinely falls
     within [start, end], 'planned' otherwise. If `end` is missing/
     unparseable but `start` isn't, compare against `start` alone (active
     once begun). Falls back to 'planned' only when even `start` is
