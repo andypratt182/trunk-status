@@ -365,6 +365,11 @@ table.closures tbody tr:last-child td { border-bottom: none; }
   font-size: 0.74rem;
 }
 .location-cell { max-width: 320px; }
+.details-cell {
+  max-width: 320px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
 .icon-header, .icon-cell {
   width: 32px;
   text-align: center;
@@ -591,12 +596,15 @@ footer.site-footer {
   }
   table.closures td.icon-cell::before { content: none; }
   /* The <summary> text ("More Information") already labels this field
-     -- a "MORE INFO" ::before label above it as well would be redundant.
-     Also collapse the cell's own padding when there's nothing in it
-     (comment was empty, so no <details> was rendered), so an empty More
-     Info field doesn't leave a blank gap in the card. */
+     -- a "MORE INFO" ::before label above it as well would be redundant. */
   table.closures td.more-info-cell::before { content: none; }
-  table.closures td.more-info-cell:empty { padding: 0; }
+  /* Details is only ever populated for one specific source (see
+     route.html's comment above the row loop) -- for every other row
+     it's genuinely empty, so collapse its padding/label the same way
+     rather than leaving a labeled-but-blank "DETAILS" line on the vast
+     majority of cards. */
+  table.closures td.details-cell:empty { padding: 0; }
+  table.closures td.details-cell:empty::before { content: none; }
   /* table.closures tr { display: block; } above has higher specificity
      than the browser's default [hidden] { display: none; }, which would
      otherwise leave day-filter/live-status-hidden rows visibly showing
