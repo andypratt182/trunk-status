@@ -2,24 +2,20 @@
 TEMPORARY investigation aid -- NOT a permanent feature of this project.
 
 Logs every NEW closure record (by record_id, first time seen) from a
-small set of "known often-quiet" sources -- Travel Alerts, the NH
-Traffic Search (beta) endpoint, TomTom Incidents -- to a JSONL file
-committed back into the repo, so their real output can be reviewed over
-time instead of only during the few minutes something happens to be
-live. Exists to help answer two open questions raised while building
-those sources:
+small set of "known often-quiet" sources -- Travel Alerts and the NH
+Traffic Search (beta) endpoint -- to a JSONL file committed back into
+the repo, so their real output can be reviewed over time instead of
+only during the few minutes something happens to be live. Exists to
+help answer one open question raised while building those sources: is
+"usually 0 results" genuinely normal, or does it hide a bug? (See each
+source module's own "if this is unexpected" log comments -- this gives
+something concrete to check against once a real entry does show up.)
 
-  1. Is "usually 0 results" from these sources genuinely normal, or does
-     it hide a bug? (See each source module's own "if this is
-     unexpected" log comments -- this gives something concrete to check
-     against once a real entry does show up.)
-  2. Do TomTom / Travel Alerts / the NH beta search ever report the SAME
-     physical incident with no shared ID to dedupe on? (See
-     sources/tomtom_incidents.py's "possible overlap, not yet resolved"
-     note.) A few weeks of real entries side by side is what's actually
-     needed to answer this -- guessing at a dedup rule without that
-     would be exactly the kind of unverified guess this project
-     otherwise avoids.
+(A TomTom Incidents source used to be tracked here too, for a second
+question about possible overlap between sources -- removed along with
+sources/tomtom_incidents.py, since TomTom's free tier didn't fit this
+project's build cadence. See routes.yaml's comment where that source
+used to be configured for the full story.)
 
 WHEN YOU'RE DONE: delete this file, its call in build.py's main(), the
 "Commit investigation log" step in
@@ -55,7 +51,6 @@ LOG_PATH = Path(__file__).parent / "investigation-log" / "tracked-source-entries
 TRACKED_SOURCE_LABELS = {
     "Travel Alert (major incident)",
     "National Highways Traffic Search (beta)",
-    "TomTom Traffic Incident",
 }
 
 

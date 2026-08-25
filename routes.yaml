@@ -167,46 +167,14 @@ site:
     - type: "national_highways_traffic_search"
       road_name: "M62"
 
-    # TomTom Traffic Incidents -- a genuinely separate, third-party live
-    # accidents/incidents feed (see sources/tomtom_incidents.py's module
-    # docstring for why this was added and its known limitations,
-    # especially: no reliable direction field, so an incident with no
-    # explicit direction in its own text shows on BOTH directions rather
-    # than being guessed or dropped). NOT auto-enabled by default -- add
-    # one entry per road you want covered, e.g.:
-    #   - type: "tomtom_incidents"
-    #     road_name: "M6"
-    # Requires a free API key from https://developer.tomtom.com/, set as
-    # a GitHub Actions secret named TOMTOM_API_KEY (see README) -- same
-    # pattern as NATIONAL_HIGHWAYS_API_KEY, but a missing key here only
-    # warns and skips this one source rather than failing the build,
-    # since this is an additional source, not the primary one.
-    # Every road below shares the same 3 default regional bboxes (see
-    # DEFAULT_BBOXES in sources/tomtom_incidents.py), each fetched ONCE
-    # and cached regardless of how many roads reference it -- adding
-    # more roads below costs nothing extra. These boxes are split up
-    # because TomTom enforces a 10,000km2-per-request area limit
-    # (confirmed live -- one big box covering the whole corridor was
-    # rejected with HTTP 400).
-    # Optional per-entry overrides: `bbox: "minLon,minLat,maxLon,maxLat"`
-    # (a single string) OR a YAML list of several such strings to use
-    # different/custom regions instead of DEFAULT_BBOXES -- each must
-    # individually stay under TomTom's 10,000km2 limit. Also optional:
-    # `category_filter: "Accident,DangerousConditions,RoadClosed"` (a
-    # comma-separated string of TomTom category names/numbers -- default
-    # documented in sources/tomtom_incidents.py; NOT a bitmask despite an
-    # earlier version of this comment saying so -- TomTom rejected that
-    # live).
-    - type: "tomtom_incidents"
-      road_name: "M6"
-    - type: "tomtom_incidents"
-      road_name: "M57"
-    - type: "tomtom_incidents"
-      road_name: "M58"
-    - type: "tomtom_incidents"
-      road_name: "M62"
-    - type: "tomtom_incidents"
-      road_name: "M74"
+    # TomTom Traffic Incidents was tried here as a live accidents/
+    # incidents source and removed -- their free tier is 2,500
+    # requests/MONTH, which doesn't fit this project's build cadence
+    # even with an on-disk refresh-throttling cache (the account
+    # genuinely ran out of credits in under a month). See git history
+    # (sources/tomtom_incidents.py, now deleted) for the full
+    # implementation if this is ever worth revisiting with a paid tier
+    # or a different provider.
 
 routes:
   - id: axis

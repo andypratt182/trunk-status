@@ -26,7 +26,6 @@ from sources import national_highways as nh
 from sources import national_highways_traffic_search as nhts
 from sources import scotland_incidents as si
 from sources import status as source_status
-from sources import tomtom_incidents as tti
 from sources import traffic_scotland as scot
 from sources import travel_alerts as ta
 from sources import xlsx_advance_notice as xlsx
@@ -1716,7 +1715,6 @@ section("investigation_log: log_new_entries (temporary investigation aid)")
 _il_closures = [
     {"record_id": "ta-1", "source_label": "Travel Alert (major incident)", "road_name": "M6"},
     {"record_id": "nhts-1", "source_label": "National Highways Traffic Search (beta)", "road_name": "M6"},
-    {"record_id": "tti-1", "source_label": "TomTom Traffic Incident", "road_name": "M6"},
     {"record_id": "xlsx-1", "source_label": "Advance notice (full closure)", "road_name": "M6"},
     {"record_id": "api-1", "source_label": "Live API", "road_name": "M6"},
 ]
@@ -1726,14 +1724,14 @@ with _tempfile.TemporaryDirectory() as _il_tmpdir:
 
     _il_appended = investigation_log.log_new_entries(_il_closures, log_path=_il_log_path)
     check(
-        "only the 3 TRACKED_SOURCE_LABELS entries are logged, NOT the XLSX/Live API "
+        "only the 2 TRACKED_SOURCE_LABELS entries are logged, NOT the XLSX/Live API "
         "ones -- those aren't part of this investigation",
-        _il_appended == 3,
+        _il_appended == 2,
     )
     check("the log file was actually created", _il_log_path.exists())
 
     _il_lines = _il_log_path.read_text(encoding="utf-8").strip().split("\n")
-    check("exactly 3 lines written", len(_il_lines) == 3)
+    check("exactly 2 lines written", len(_il_lines) == 2)
     _il_first_entry = json.loads(_il_lines[0])
     check(
         "each logged entry preserves the original record fields and adds first_seen_at",
@@ -1749,21 +1747,21 @@ with _tempfile.TemporaryDirectory() as _il_tmpdir:
         _il_appended_again == 0,
     )
     check(
-        "the file itself is unchanged (still exactly 3 lines) after the no-op re-run",
-        len(_il_log_path.read_text(encoding="utf-8").strip().split("\n")) == 3,
+        "the file itself is unchanged (still exactly 2 lines) after the no-op re-run",
+        len(_il_log_path.read_text(encoding="utf-8").strip().split("\n")) == 2,
     )
 
-    # A genuinely new entry appears (a 4th tracked-source record with a
-    # record_id not seen before) alongside the 3 already-logged ones.
+    # A genuinely new entry appears (a 3rd tracked-source record with a
+    # record_id not seen before) alongside the 2 already-logged ones.
     _il_closures_with_new = _il_closures + [
-        {"record_id": "tti-2", "source_label": "TomTom Traffic Incident", "road_name": "M57"},
+        {"record_id": "nhts-2", "source_label": "National Highways Traffic Search (beta)", "road_name": "M57"},
     ]
     _il_appended_new = investigation_log.log_new_entries(_il_closures_with_new, log_path=_il_log_path)
-    check("exactly 1 genuinely new entry is appended, not all 4 tracked entries again", _il_appended_new == 1)
+    check("exactly 1 genuinely new entry is appended, not both tracked entries again", _il_appended_new == 1)
     check(
-        "the file now has 4 lines total (3 original + 1 new), not 7 (no duplication "
-        "of the already-logged 3)",
-        len(_il_log_path.read_text(encoding="utf-8").strip().split("\n")) == 4,
+        "the file now has 3 lines total (2 original + 1 new), not 5 (no duplication "
+        "of the already-logged 2)",
+        len(_il_log_path.read_text(encoding="utf-8").strip().split("\n")) == 3,
     )
 
 with _tempfile.TemporaryDirectory() as _il_tmpdir2:
@@ -2444,357 +2442,87 @@ source_status.reset()
 
 
 # =======================================================================
-# sources/tomtom_incidents.py
-# =======================================================================
-
-section("tomtom_incidents: normalize_incident (realistic sample payload)")
-
-_tti_feature_m6_no_direction = {
-    "type": "Feature",
-    "geometry": {"type": "Point", "coordinates": [-2.5, 53.4]},
-    "properties": {
-        "id": "abc123",
-        "iconCategory": 1,
-        "events": [{"description": "Accident", "code": 1}],
-        "startTime": "2026-08-20T14:05:11.123Z",
-        "endTime": None,
-        "from": "M6 J20",
-        "to": "M6 J21",
-        "roadNumbers": ["M6"],
-    },
-}
-_tti_feature_wrong_road = {
-    "type": "Feature",
-    "geometry": {"type": "Point", "coordinates": [-2.9, 53.6]},
-    "properties": {
-        "id": "def456",
-        "iconCategory": 1,
-        "events": [{"description": "Accident"}],
-        "startTime": "2026-08-20T14:10:00",
-        "endTime": None,
-        "from": "M62 J8",
-        "to": "M62 J9",
-        "roadNumbers": ["M62"],
-    },
-}
-_tti_feature_with_direction_no_id = {
-    "type": "Feature",
-    "geometry": {"type": "Point", "coordinates": [-2.55, 53.42]},
-    "properties": {
-        "iconCategory": 128,
-        "events": [{"description": "Road closed"}, {"description": "Road closed"}],
-        "startTime": "2026-08-20T15:00:00",
-        "endTime": "2026-08-20T18:00:00",
-        "from": "M6 southbound J19",
-        "to": "M6 J18",
-        "roadNumbers": ["M6"],
-    },
-}
-
-_r1 = tti.normalize_incident(_tti_feature_m6_no_direction, "M6")
-check("real M6 accident matched (roadNumbers contains M6)", _r1 is not None)
-check("record_id uses TomTom's real id when present", _r1["record_id"] == "tomtom-abc123")
-check("cause_type/comment is the event description", _r1["cause_type"] == "Accident" and _r1["comment"] == "Accident")
-check("location combines from/to", _r1["location_description"] == "M6 M6 J20 to M6 J21")
-check("start_datetime has sub-second precision stripped", _r1["start_datetime"] == "2026-08-20T14:05:11")
-check("end_datetime empty (honest, not guessed) when TomTom gives none", _r1["end_datetime"] == "")
-check(
-    "no explicit direction word anywhere in from/to/cause -> defaults to "
-    "'Both directions' rather than guessing (see module docstring)",
-    _r1["direction"] == "Both directions",
-)
-check("source_label correctly identifies this as TomTom", _r1["source_label"] == "TomTom Traffic Incident")
-
-check(
-    "a feature whose roadNumbers doesn't mention the target road is excluded",
-    tti.normalize_incident(_tti_feature_wrong_road, "M6") is None,
-)
-
-_r3 = tti.normalize_incident(_tti_feature_with_direction_no_id, "M6")
-check(
-    "explicit 'southbound' in the from text IS picked up (not defaulted to Both directions)",
-    _r3["direction"] == "Southbound",
-)
-check(
-    "missing TomTom id falls back to a coordinates+startTime derived id, not dropped",
-    _r3["record_id"].startswith("tomtom-") and "abc123" not in _r3["record_id"],
-)
-check(
-    "duplicate identical event descriptions are deduped, not repeated",
-    _r3["cause_type"] == "Road closed",
-)
-
-section("tomtom_incidents: compute_validity_status (REGRESSION GUARD -- was hardcoded 'active' regardless of dates, same risk category as the XLSX bug)")
-
-_tti_now = _dt(2026, 8, 23, 2, 29)
-
-check(
-    "a window genuinely including `now` computes 'active'",
-    tti.compute_validity_status("2026-08-22T22:00:00", "2026-08-23T06:00:00", _tti_now) == "active",
-)
-check(
-    "a window that hasn't started yet computes 'planned', NOT the old hardcoded "
-    "'active' -- this is the exact fix",
-    tti.compute_validity_status("2026-08-24T22:00:00", "2026-08-25T06:00:00", _tti_now) == "planned",
-)
-check(
-    "a window that's already fully ended computes 'planned', not 'active'",
-    tti.compute_validity_status("2026-08-20T22:00:00", "2026-08-21T06:00:00", _tti_now) == "planned",
-)
-check(
-    "no end time, start already passed -> 'active' based on start alone",
-    tti.compute_validity_status("2026-08-22T22:00:00", "", _tti_now) == "active",
-)
-check(
-    "no end time, start still in the future -> 'planned'",
-    tti.compute_validity_status("2026-08-24T22:00:00", "", _tti_now) == "planned",
-)
-check(
-    "no parseable dates at all -> falls back to 'active', NOT 'planned' -- unlike "
-    "XLSX's advance-notice report, TomTom's timeValidityFilter='present' still means "
-    "something real about this specific incident even without dates to verify it "
-    "against (see compute_validity_status()'s docstring for why this differs "
-    "from xlsx_advance_notice.py's equivalent fallback)",
-    tti.compute_validity_status("", "", _tti_now) == "active",
-)
-
-section("tomtom_incidents: normalize_incident end-to-end with an explicit `now` (deterministic)")
-
-_tti_planned_feature = {
-    "type": "Feature",
-    "geometry": {"type": "Point", "coordinates": [-2.5, 53.4]},
-    "properties": {
-        "id": "future1",
-        "events": [{"description": "Road closed"}],
-        "startTime": "2026-08-24T22:00:00Z",
-        "endTime": "2026-08-25T06:00:00Z",
-        "from": "M6 J20", "to": "M6 J21", "roadNumbers": ["M6"],
-    },
-}
-_tti_active_result = tti.normalize_incident(_tti_feature_m6_no_direction, "M6", now=_tti_now)
-_tti_planned_result = tti.normalize_incident(_tti_planned_feature, "M6", now=_tti_now)
-check(
-    "an incident whose window already covers `now` comes out 'active'",
-    _tti_active_result["validity_status"] == "active",
-)
-check(
-    "REGRESSION GUARD: an incident scheduled for the future comes out 'planned' "
-    "through the real normalize_incident() call, not hardcoded 'active' regardless "
-    "of its own dates",
-    _tti_planned_result["validity_status"] == "planned",
-)
-check(
-    "when `now` isn't passed at all, normalize_incident() still works (defaults to "
-    "the real current time) rather than requiring every caller to supply one",
-    tti.normalize_incident(_tti_feature_m6_no_direction, "M6")["validity_status"] in ("active", "planned"),
-)
-
-section("tomtom_incidents: junction matching works via shared matching.py logic")
-
-check(
-    "junctions extracted correctly from the combined from/to location text",
-    matching._junctions_in_text(_r1["location_description"]) == [20, 21],
-)
-_tti_rows_both = matching.rows_for_leg([_r1], "M6", "northBound", 19, 22)
-check(
-    "'Both directions' default correctly matches a leg regardless of its "
-    "own configured data_direction (northBound here)",
-    len(_tti_rows_both) == 1,
-)
-_tti_rows_south = matching.rows_for_leg([_r1], "M6", "southBound", 19, 22)
-check(
-    "...and also matches the southbound leg for the same road/range",
-    len(_tti_rows_south) == 1,
-)
-
-section("tomtom_incidents: fetch_from_tomtom_incidents (missing API key)")
-
-_tti_calls = []
-_original_tti_fetch_page = tti.fetch_page
-tti.fetch_page = lambda bbox, category_filter, api_key: _tti_calls.append(1) or {"incidents": []}
-tti._response_cache.clear()
-tti._warned_missing_key = False
-try:
-    _tti_no_key_result = tti.fetch_from_tomtom_incidents("M6", api_key="")
-finally:
-    tti.fetch_page = _original_tti_fetch_page
-
-check("missing API key returns an empty list rather than raising", _tti_no_key_result == [])
-check("missing API key never even attempts a fetch", _tti_calls == [])
-check(
-    "missing API key records 'failed' (red), not 'ok_no_results' (amber) -- the "
-    "source never even attempted to run this build, which is worth flagging "
-    "distinctly from 'ran fine, found nothing'",
-    source_status.get_statuses() == [
-        {"label": "TomTom Incidents -- M6", "state": "failed", "count": 0, "error": "TOMTOM_API_KEY not set"}
-    ],
-)
-source_status.reset()
-
-section("tomtom_incidents: fetch_from_tomtom_incidents records status correctly (beyond the missing-key case above)")
-
-tti._response_cache.clear()
-tti.fetch_page = lambda bbox, category_filter, api_key: {"incidents": [_tti_feature_m6_no_direction]}
-try:
-    tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
-finally:
-    tti.fetch_page = _original_tti_fetch_page
-_tti_ok_statuses = source_status.get_statuses()
-check(
-    "a successful fetch with a real result records 'ok_with_results' (green)",
-    len(_tti_ok_statuses) == 1 and _tti_ok_statuses[0]["state"] == "ok_with_results"
-    and _tti_ok_statuses[0]["count"] == 1,
-)
-
-source_status.reset()
-tti._response_cache.clear()
-tti.fetch_page = lambda bbox, category_filter, api_key: {"incidents": []}
-try:
-    tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
-finally:
-    tti.fetch_page = _original_tti_fetch_page
-_tti_empty_statuses = source_status.get_statuses()
-check(
-    "a successful fetch that legitimately finds 0 incidents records 'ok_no_results' "
-    "(amber), not 'failed'",
-    len(_tti_empty_statuses) == 1 and _tti_empty_statuses[0]["state"] == "ok_no_results",
-)
-
-source_status.reset()
-tti._response_cache.clear()
-
-
-def _fake_tti_fetch_page_fail(bbox, category_filter, api_key):
-    raise urllib.error.HTTPError("https://api.tomtom.com/", 500, "Internal Server Error", {}, None)
-
-
-tti.fetch_page = _fake_tti_fetch_page_fail
-try:
-    _tti_fail_results = tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
-finally:
-    tti.fetch_page = _original_tti_fetch_page
-_tti_fail_statuses = source_status.get_statuses()
-check("a genuine fetch failure returns [] (never crashes the build)", _tti_fail_results == [])
-check(
-    "a genuine bbox fetch failure records 'failed' (red), mentioning how many "
-    "of the configured bboxes failed",
-    len(_tti_fail_statuses) == 1 and _tti_fail_statuses[0]["state"] == "failed"
-    and "1/1" in _tti_fail_statuses[0]["error"],
-)
-
-source_status.reset()
-tti._response_cache.clear()
-
-section("tomtom_incidents: shared bbox is fetched once across multiple roads (caching)")
-
-_tti_shared_payload = {"incidents": [_tti_feature_m6_no_direction, _tti_feature_wrong_road]}
-_tti_fetch_calls = []
-
-
-def _fake_tti_fetch_page(bbox, category_filter, api_key):
-    _tti_fetch_calls.append((bbox, category_filter))
-    return _tti_shared_payload
-
-
-tti.fetch_page = _fake_tti_fetch_page
-tti._response_cache.clear()
-try:
-    _tti_m6_results = tti.fetch_from_tomtom_incidents("M6", api_key="fake-key", bbox="-3,54,-2,55")
-    _tti_m62_results = tti.fetch_from_tomtom_incidents("M62", api_key="fake-key", bbox="-3,54,-2,55")
-finally:
-    tti.fetch_page = _original_tti_fetch_page
-
-check("the underlying HTTP fetch happened exactly once, not once per road", len(_tti_fetch_calls) == 1)
-check("M6 road_name correctly pulled only its own matching incident", len(_tti_m6_results) == 1)
-check("M62 road_name correctly pulled only its own matching incident", len(_tti_m62_results) == 1)
-
-section("tomtom_incidents: multiple bboxes are all fetched and merged, with cross-box dedup")
-
-_tti_box_a_payload = {"incidents": [_tti_feature_m6_no_direction]}  # id "abc123"
-_tti_box_b_payload = {"incidents": [_tti_feature_m6_no_direction, _tti_feature_with_direction_no_id]}
-_tti_multi_calls = []
-
-
-def _fake_tti_multi_fetch_page(bbox, category_filter, api_key):
-    _tti_multi_calls.append(bbox)
-    return {"box-a": _tti_box_a_payload, "box-b": _tti_box_b_payload}[bbox]
-
-
-tti.fetch_page = _fake_tti_multi_fetch_page
-tti._response_cache.clear()
-try:
-    _tti_multi_results = tti.fetch_from_tomtom_incidents(
-        "M6", api_key="fake-key", bbox=["box-a", "box-b"],
-    )
-finally:
-    tti.fetch_page = _original_tti_fetch_page
-
-check("both configured bboxes were fetched", _tti_multi_calls == ["box-a", "box-b"])
-check(
-    "the incident present in BOTH boxes (id 'abc123', simulating boundary overlap) "
-    "is only counted once, not twice, in the merged results",
-    len(_tti_multi_results) == 2,
-)
-check(
-    "the default bbox param (None) resolves to DEFAULT_BBOXES, not a single box",
-    isinstance(tti.DEFAULT_BBOXES, list) and len(tti.DEFAULT_BBOXES) == 3,
-)
-check(
-    "DEFAULT_CATEGORY_FILTER is a comma-separated string of TomTom's real "
-    "category names (confirmed from TomTom's own docs), not the OR'd bitmask "
-    "integer an earlier version of this module wrongly used and TomTom rejected live",
-    tti.DEFAULT_CATEGORY_FILTER == "Accident,DangerousConditions,RoadClosed",
-)
-
-section("tomtom_incidents: detect_direction")
-
-check("explicit direction word detected case-insensitively", tti.detect_direction("m6 EASTBOUND j5") == "Eastbound")
-check("no direction word anywhere defaults to 'Both directions'", tti.detect_direction("M6 J5 to J6") == "Both directions")
-check("empty text defaults to 'Both directions'", tti.detect_direction("") == "Both directions")
-
-
-# =======================================================================
 # templates/route.html: More Info disclosure cell
 # =======================================================================
 
-section("route.html: More Info cell renders truly empty (not just whitespace) when there's no comment")
+section("route.html: Details cell is per-source -- ONLY 'National Highways Traffic Search (beta)' rows show it")
 
 from jinja2 import Environment as _JinjaEnv, FileSystemLoader as _JinjaLoader
 _env = _JinjaEnv(loader=_JinjaLoader("templates"))
 
-_row_no_comment = {
+_NHTS_LABEL = "National Highways Traffic Search (beta)"
+
+_row_nhts_no_comment = {
     "status": "planned", "icon": "roadworks.png", "location": "M6 J1",
     "comment": "", "lane_info": "", "lanes_restricted": None, "lanes_operational": None,
-    "cause": "Road maintenance", "start": "1 Jan", "end": "2 Jan",
-    "start_iso": "", "end_iso": "", "source_label": "Feed",
+    "cause": "Congestion", "start": "1 Jan", "end": "2 Jan",
+    "start_iso": "", "end_iso": "", "source_label": _NHTS_LABEL,
 }
-_row_with_comment = dict(_row_no_comment, comment="Diversion: Follow mainline closure")
-_leg = {"road_name": "M6", "badge_class": "badge-motorway", "junction_from": 1, "junction_to": 2,
-        "count": 2, "rows": [_row_no_comment, _row_with_comment]}
+_row_nhts_with_comment = dict(_row_nhts_no_comment, comment="There are currently delays of 11 minutes")
+_row_nhts_comment_equals_location = dict(_row_nhts_no_comment, comment="M6 J1")
+_row_other_source_with_comment = dict(
+    _row_nhts_no_comment, source_label="Traffic Scotland (scraped)",
+    comment="Diversion: Follow mainline closure",
+)
+_leg = {
+    "road_name": "M6", "badge_class": "badge-motorway", "junction_from": 1, "junction_to": 2,
+    "count": 4,
+    "rows": [_row_nhts_no_comment, _row_nhts_with_comment, _row_nhts_comment_equals_location,
+             _row_other_source_with_comment],
+}
 
 _html = _env.get_template("route.html").render(
     site_title="X", route_name="X", direction_label="X", leg_groups=[_leg],
     generated_at="X", feed_updated="X", style_hash="", script_hash="",
 )
 
-_more_info_cells = re.findall(r'<td class="more-info-cell"[^>]*>.*?</td>', _html, re.S)
-check("both rows produced a more-info-cell", len(_more_info_cells) == 2)
+_details_cells = re.findall(r'<td class="details-cell"[^>]*>.*?</td>', _html, re.S)
+check("all 4 rows produced a details-cell (kept for column alignment even when empty)", len(_details_cells) == 4)
 
-_empty_inner = _more_info_cells[0].split(">", 1)[1].rsplit("<", 1)[0]
+
+def _inner(cell):
+    return cell.split(">", 1)[1].rsplit("<", 1)[0]
+
+
+check("NH beta search row with a real comment shows it directly, no click needed", "delays of 11 minutes" in _details_cells[1])
 check(
-    "empty-comment case renders with ZERO characters between the tags -- not just visually "
-    "empty, since CSS :empty (used to collapse this cell's padding) requires that exactly; "
-    "a real bug caught here: the original template left whitespace/newlines even when the "
-    "{% if %} was false, which :empty does not match",
-    _empty_inner == "",
+    "NH beta search row with NO comment renders truly empty (zero characters, not a "
+    "dash) -- so the CSS :empty collapse rule actually matches on mobile",
+    _inner(_details_cells[0]) == "",
 )
 check(
-    "the comment case correctly contains the disclosure with the real comment text",
-    "<details>" in _more_info_cells[1] and "Diversion: Follow mainline closure" in _more_info_cells[1],
+    "NH beta search row whose comment just duplicates the location is ALSO treated as "
+    "empty, same as no comment",
+    _inner(_details_cells[2]) == "",
 )
 check(
-    "Location cell no longer duplicates the comment text (moved to More Info instead)",
-    "Diversion: Follow mainline closure" not in re.search(
+    "REGRESSION GUARD: a DIFFERENT source (Traffic Scotland here) with a real comment "
+    "still renders an empty Details cell -- this column is deliberately per-source, "
+    "only National Highways Traffic Search (beta) rows ever populate it",
+    _inner(_details_cells[3]) == "",
+)
+
+_more_info_cells = re.findall(r'<td class="more-info-cell"[^>]*>.*?</td>', _html, re.S)
+check("all 4 rows also produced a more-info-cell", len(_more_info_cells) == 4)
+check(
+    "NH beta search rows get a simplified More Info (Source only) even with no "
+    "comment at all, since More Info is unconditional for this one source",
+    all("<details>" in c and f"Source: {_NHTS_LABEL}" in c for c in _more_info_cells[:3]),
+)
+check(
+    "NH beta search's More Info never repeats the comment text -- just the Source line",
+    "delays of 11 minutes" not in _more_info_cells[1],
+)
+check(
+    "REGRESSION GUARD: a different source (Traffic Scotland) keeps the ORIGINAL "
+    "behavior -- comment shown INSIDE the collapsed More Info disclosure, not in "
+    "Details, since only NH beta search moved its comment out",
+    "<details>" in _more_info_cells[3] and "Diversion: Follow mainline closure" in _more_info_cells[3]
+    and "Source: Traffic Scotland (scraped)" in _more_info_cells[3],
+)
+check(
+    "Location cell never duplicates any row's comment text, regardless of source",
+    "delays of 11 minutes" not in re.search(
         r'<td class="location-cell"[^>]*>.*?</td>', _html, re.S
     ).group(0),
 )

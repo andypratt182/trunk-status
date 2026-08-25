@@ -799,41 +799,135 @@ closure was published under.
   failure on any individual detail page is logged and skipped rather
   than failing the whole build.
 
-## TomTom Traffic Incidents (live accidents/incidents)
+## XLSX advance-notice URL discovery (fixed a real, confirmed-live bug)
+
+`sources/xlsx_advance_notice.py` used to point at a single hardcoded
+download URL for National Highways' "7-day closure report" XLSX. That
+URL went stale in production: National Highways mints a new hashed
+media path (e.g. `/media/qsnnq4d0/7-day-closure-report.xlsx`) each time
+they republish the report, and the old hashed URL just kept quietly
+serving whatever it captured at that point — it never returned an
+error, so the source's own 🟢/🟡/🔴 status stayed green throughout.
+"Fetch succeeded" and "fetch got the CURRENT data" turned out to be two
+different things this project hadn't previously had to distinguish.
+
+Fixed by scraping the real, current download link from the report
+page's own HTML on every build (`discover_xlsx_url()`), matched by
+filename rather than hash so it survives the rotation — the same
+reasoning `sources/traffic_scotland.py` already applies for its own
+data. `routes.yaml`'s `xlsx_advance_notice` entry now takes
+`report_page_url` (primary) and an optional `fallback_xlsx_url` (used
+only if discovery itself fails, e.g. the report page is unreachable) —
+the old single `url:` form still works for backward compatibility, but
+carries the exact staleness risk above; don't go back to it.
+
+## XLSX advance-notice status stuck on "Planned" (fixed a second, related bug)
+
+Chasing the above URL issue surfaced a second, genuinely separate bug
+in the same source: this report has no "status" column of its own, so
+every row's `validity_status` was hardcoded to `"planned"` permanently
+— including hours after a closure had actually started. A user caught
+this live: an M6 J39–40 closure showed "Planned" on the site at 02:29
+while genuinely inside its own 22:00–06:00 window, with National
+Highways' own app correctly showing "Active" for the same closure at
+the same moment.
+
+Fixed with `compute_validity_status()`, the same real-time-window logic
+`sources/traffic_scotland.py` already used successfully for its own
+data (duplicated rather than imported, matching this project's
+no-cross-imports-between-sources pattern) — `"active"` only while `now`
+genuinely falls within `[start, end]`, `"planned"` otherwise, falling
+back to comparing against `start` alone if `end` is missing, and to
+`"planned"` only if even `start` can't be parsed (this report is
+advance notice only, so there's nothing safe to assume "active" from
+in that case).
+
+(A TomTom Incidents source got the same preemptive fix applied when it
+existed, for the same reasoning — removed from the project since, see
+the TomTom section further down for why.)
+
+## M74 junctions below this route's own range wrongly labeled "M6"
+
+A user reported a real M74 J6–J8 closure showing as
+`"M74(S) M6 J6 - J8"` on the site — both are genuine M74 junctions with
+no connection to the M6 at all. Root cause was in `matching.py`'s
+`label_junction_for_display()`, used to label a junction that falls
+outside a route's own configured leg range with the real continuing
+road's name (`_KNOWN_ROAD_CONTINUATIONS = {"M74": "M6"}`, since M74
+tops out around J22 in this project's configuration and continues as
+M6 with much higher junction numbers beyond that — e.g. a real closure
+spanning M74's own J22 to the M6's J45 correctly shows as
+`"M74(S) J22 - M6 J45"`). That logic triggered on ANY out-of-range
+junction, in *either* direction — but M74's real numbering starts at
+J1, so a junction *below* this route's own configured lower bound (J8,
+here — just where this particular route joins the M74, not where the
+real motorway starts) is still almost certainly a legitimate M74
+junction the route's configured slice simply doesn't cover, not a sign
+it belongs to a different road. Only a junction *above* the upper bound
+can genuinely not be an M74 junction at all. Fixed by checking
+`junction > hi` instead of `not (lo <= junction <= hi)` — see
+`label_junction_for_display()`'s own docstring for the full reasoning.
+
+## Index page's "N active" count could be LOWER under "Today" than "All" (impossible, but happened)
+
+A user caught this by comparing two screenshots of the same page taken
+seconds apart, one with "Today" selected and one with "All" — every
+single route/direction's active count was lower under "Today". That can
+never legitimately happen: "active" means happening right now, and
+right now is always within today, so Today's active count can only
+equal All's, never be less than it.
+
+Root cause was in `static/day-filter.js`'s `overlapsDay()` — when a
+closure has no end time at all (Travel Alerts always lacks one by
+design), the code substituted its own start time
+as a stand-in end, turning an ongoing, no-stated-end incident into what
+looked like an instantaneous event that already happened — which the
+"already ended" check then excluded from every specific-day view. "All"
+never calls `overlapsDay()` at all (short-circuited), so the same
+entries survived there untouched, producing exactly the asymmetry a
+user found. Fixed by treating a genuinely unknown end as "ongoing
+indefinitely" instead of "ended at start" — never treated as
+already-ended, and considered to overlap a given day as long as it had
+already started by that day's end.
+
+This is also the first fix in this project with a **real, permanent
+automated test** for client-side JS — see `test_day_filter.js` (run via
+`node test_day_filter.js`, no framework or dependency, matching
+`test_build.py`'s own style) and the small, behavior-preserving guard
+added to the bottom of `day-filter.js` so its pure helper functions
+(`overlapsDay`, `hasDefinitivelyEnded`, `liveStatusFor`) can be
+`require()`'d in a plain Node environment without a DOM — changes
+nothing about how the file runs in a real browser. Both this and
+`test_build.py` are now also run automatically in CI, before the actual
+site build, in `.github/workflows/build-deploy.yml` — neither was
+wired into CI at all before this, so a regression in either could only
+ever have been caught by someone running it locally.
+
+## TomTom Traffic Incidents — tried and removed
 
 Added to cover a real gap: National Highways' own "unplanned" closure
-data turned out not to carry genuinely incident-flavoured records (see
-`sources/national_highways.py`), and both Travel Alerts and the beta
-traffic-search endpoint are known to be thin — Travel Alerts by design
-(only 2-3 nationwide entries at a time), the beta endpoint because
-National Highways' own new incidents page is still in beta as of Aug
-2026. TomTom's feed is a genuinely separate, third-party data source
-(not a re-scrape of anything National Highways/Traffic Scotland already
-publish), free up to 2,500 requests/day, and DATEX-II-based like the
-main API this project already parses.
+data turned out not to carry genuinely incident-flavoured records, and
+both Travel Alerts and the beta traffic-search endpoint are known to be
+thin. TomTom's feed genuinely filled that gap while it ran — but its
+free tier is 2,500 requests/**month** (confirmed directly from TomTom's
+own pricing page — not per day, an earlier version of this doc got that
+wrong), which doesn't fit this project's ~5-10 minute build cadence
+even with an on-disk refresh-throttling cache: a real account ran out
+of credits (confirmed live: TomTom's API returned HTTP 403
+`"InsufficientFunds"`) well under a month after enabling it.
 
-**Kept fully separate, NOT auto-enabled** — see `sources/tomtom_incidents.py`'s
-module docstring for the full design and, most importantly, **known
-limitations**: TomTom's incident data has no reliable direction field,
-so an incident with no explicit direction word in its own text is shown
-on **both** directions rather than guessed or dropped; the three
-default bounding boxes are a reasonable-effort split of the corridor
-(TomTom enforces a hard 10,000km² limit per request — confirmed live,
-not just documented — so one box covering the whole route network isn't
-possible), not verified against a live map for exact junction coverage;
-and this source could report the same physical accident that Travel
-Alerts or the beta endpoint also report, with no shared ID to dedupe
-against — a known limitation, not a guessed-at fix.
-
-To enable it: get a free API key at https://developer.tomtom.com/ (see
-"API & SDK Keys" in the dashboard), add it as a GitHub Actions secret
-named `TOMTOM_API_KEY` (or export it locally), then uncomment/add
-`tomtom_incidents` entries per road in `routes.yaml`'s
-`additional_sources` (commented-out examples are already there). Every
-road sharing the same bounding box — the normal case — is fetched in a
-single shared HTTP request, so adding more roads costs nothing extra. A
-missing key just warns and skips this one source; it never fails the
-build.
+Checked for a free replacement before removing it outright — TomTom's
+own paid tiers, Azure Maps (1,000/month free, confirmed worse), HERE
+(similar ballpark, now requires a card on file), AA Roadwatch (no
+public developer API, consumer-only), Google Maps Platform (no
+incidents-data API product exists at all, only routing/tiles that
+factor in traffic indirectly), and the EU/UK's official "National
+Access Point" open-data route (which just points to `data.gov.uk`,
+itself only hosting retrospective annual STATS19 collision statistics,
+not a live feed) — none of them worked out. Removed rather than kept
+half-working; see git history for `sources/tomtom_incidents.py` if this
+is ever worth revisiting, e.g. with a paid tier once real usage
+patterns are better understood.
 
 ## Data sources status (on the site itself)
 
@@ -845,7 +939,7 @@ exists because most of these sources' fetch/parse failures were already
 being silently swallowed (caught internally, logged, and turned into an
 empty result list) so a broken scraper could go unnoticed for weeks —
 but several of these sources are ALSO legitimately, normally quiet most
-of the time (Travel Alerts, the NH beta search, sometimes TomTom). A
+of the time (Travel Alerts, the NH beta search). A
 naive "red if 0 results" indicator would be permanently, misleadingly
 red on ordinary days, so 🟡 exists specifically to make that distinction
 honestly rather than lose it.
@@ -886,6 +980,22 @@ reflects how the most recent build went, not whether a source has been
 quietly broken for weeks (a possible future addition, not built here —
 would need somewhere to persist state between separate GitHub Actions
 runs, e.g. a small committed JSON log).
+
+## Investigation log (TEMPORARY — see investigation_log.py)
+
+`investigation_log.py` logs every new entry (once, by `record_id`) from
+Travel Alerts and the NH Traffic Search (beta) endpoint to
+`investigation-log/tracked-source-entries.jsonl`, committed
+back to the repo by the build workflow. This is a temporary aid for one
+open question, not a permanent feature — see that file's own module
+docstring for the full reasoning and, importantly, **what to delete
+once you're done with it** (the module itself, its call in `build.py`,
+and the workflow's commit step + its `contents: write` permission
+override). Most builds have nothing new to log — these sources are
+often quiet by design — so most runs leave the file untouched and
+commit nothing. (A TomTom Incidents source used to be tracked here too,
+for a second question about possible cross-source overlap — removed
+along with that source; see the TomTom section above for why.)
 
 ## Set up your routes
 
