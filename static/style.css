@@ -27,12 +27,52 @@
   --radius: 6px;
 }
 
+/* Flashing status dots -- ONLY for the 3 sources below, chosen
+   deliberately: these are the ones reporting genuinely live, currently-
+   happening incidents (crashes, breakdowns, congestion detected right
+   now), where a flash earns its attention. Every other source (the
+   primary API, XLSX advance notice, Traffic Scotland roadworks) reports
+   scheduled/planned closures -- correct to show as Active/Planned, but
+   not the kind of "happening right now" urgency a flash should be
+   reserved for. Scoped via the data-source attribute already on every
+   <tr> (see route.html) rather than a template conditional, so this
+   list lives in exactly one place -- edit the selector list below to
+   add/remove a source, nothing in route.html needs to change.
+   Deliberately a hard on/off blink (not a smooth fade) per explicit
+   request -- see @keyframes statusFlash below for how that's done
+   without relying on less-widely-supported steps()/jump-term syntax. */
+.status-dot-after { display: none; margin-left: 7px; margin-right: 0; }
+tr[data-source="Traffic Scotland Incident"] .status-dot-after,
+tr[data-source="Travel Alert (major incident)"] .status-dot-after,
+tr[data-source="National Highways Traffic Search (beta)"] .status-dot-after {
+  display: inline-block;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .fade-in { animation: fadeIn 0.4s ease-out both; }
+  tr[data-source="Traffic Scotland Incident"] .status-dot,
+  tr[data-source="Traffic Scotland Incident"] .status-dot-after,
+  tr[data-source="Travel Alert (major incident)"] .status-dot,
+  tr[data-source="Travel Alert (major incident)"] .status-dot-after,
+  tr[data-source="National Highways Traffic Search (beta)"] .status-dot,
+  tr[data-source="National Highways Traffic Search (beta)"] .status-dot-after {
+    animation: statusFlash 1s linear infinite;
+  }
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes statusFlash {
+  /* Jumping between 49.9% and 50% (rather than an even 0%/50%/100%
+     split with an eased transition) makes the opacity change land in
+     an imperceptibly short slice of the cycle -- effectively an instant
+     on/off blink under `linear` timing, without needing steps()'s
+     jump-term keywords (jump-start/jump-none/etc.), which have patchier
+     older-browser support than a plain keyframe/linear combination. */
+  0%, 49.9%  { opacity: 1; }
+  50%, 99.9% { opacity: 0; }
+  100%       { opacity: 1; }
 }
 
 * { box-sizing: border-box; }
