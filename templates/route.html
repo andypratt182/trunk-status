@@ -45,10 +45,30 @@
           <th>Cause</th>
           <th>Start</th>
           <th>End</th>
+          <th>Details</th>
           <th>More Info</th>
         </tr>
       </thead>
       <tbody>
+        {#
+          Details/More Info below are deliberately per-source: only
+          "National Highways Traffic Search (beta)" rows (short,
+          one-line congestion messages, e.g. "delays of 11 minutes...")
+          show their comment always-visible in Details, with More Info
+          simplified to just the Source line. Every other source keeps
+          the original behavior -- comment hidden inside the collapsed
+          More Info disclosure -- since other sources' comments can be
+          far longer (e.g. Traffic Scotland/XLSX advance-notice full
+          diversion instructions), and always showing those in full on
+          every card would make cards noticeably longer for those
+          sources than this one short-comment source actually needs.
+          The Details <td> is still rendered (empty) for every row
+          regardless of source, not conditionally omitted, so the
+          table's column count/alignment stays consistent when a leg
+          mixes rows from several sources at once -- CSS collapses the
+          empty cell's padding/label on mobile instead (see
+          static/style.css's .details-cell:empty rules).
+        #}
         {% for row in leg.rows %}
         <tr class="status-{{ row.status }}" data-start="{{ row.start_iso }}" data-end="{{ row.end_iso }}" data-source="{{ row.source_label }}">
           <td data-label="Status"><span class="status-dot"></span><span data-status-label>{{ row.status | capitalize }}</span></td>
@@ -77,7 +97,11 @@
             {{ end_parts[0] }}<br>
             {% if end_parts|length > 1 %}{{ end_parts[1] }}{% endif %}
           </td>
-          <td class="more-info-cell" data-label="More Info">{% if row.comment and row.comment != row.location %}<details>
+          <td class="details-cell" data-label="Details">{% if row.source_label == "National Highways Traffic Search (beta)" and row.comment and row.comment != row.location %}{{ row.comment }}{% endif %}</td>
+          <td class="more-info-cell" data-label="More Info">{% if row.source_label == "National Highways Traffic Search (beta)" %}<details>
+              <summary>More Information</summary>
+              <p class="closure-source">Source: {{ row.source_label }}</p>
+            </details>{% elif row.comment and row.comment != row.location %}<details>
               <summary>More Information</summary>
               <p>{{ row.comment }}</p>
               <p class="closure-source">Source: {{ row.source_label }}</p>
