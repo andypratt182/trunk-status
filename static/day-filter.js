@@ -167,6 +167,33 @@
   // server-rendered value is left untouched.
   const TRAFFIC_SCOTLAND_SOURCE_LABEL = "Traffic Scotland (scraped)";
 
+  // National Highways Traffic Search (beta)'s own "returnToNormal" field
+  // is a PREDICTION, not a confirmed end time -- directly observed to be
+  // revised repeatedly for the same still-ongoing incident (89 -> 72 ->
+  // 54 minutes, then a DIFFERENT nearby record showing 11-12 minutes, as
+  // National Highways kept re-estimating). Treating that kind of
+  // estimate as a hard "definitely over, hide it" cutoff -- the correct
+  // behavior for a source with a real, planned end time, like a
+  // scheduled closure -- was actively wrong here: it hid a genuinely
+  // still-ongoing collision/congestion entry the moment its ESTIMATE
+  // happened to lapse, not when the real situation actually resolved.
+  // Confirmed live: a hard page reload showed the entry gone from every
+  // view, including "All", purely because its predicted return-to-
+  // normal time had passed -- while National Highways' own app (and a
+  // still-active Travel Alert for the same incident) showed it as very
+  // much ongoing. Scoped to exactly this one source via
+  // effectiveEndForFiltering() below -- every other source's end time
+  // (a real scheduled closure end, a Traffic Scotland window, etc.) is
+  // untouched and still treated as authoritative. The estimated end
+  // time itself is still DISPLAYED as normal (still useful information)
+  // -- this only changes whether it's trusted enough to hide the row.
+  const NH_TRAFFIC_SEARCH_SOURCE_LABEL = "National Highways Traffic Search (beta)";
+
+  function effectiveEndForFiltering(endAttr, sourceLabel) {
+    if (sourceLabel === NH_TRAFFIC_SEARCH_SOURCE_LABEL) return null;
+    return endAttr;
+  }
+
   function liveStatusFor(startAttr, endAttr, fallbackStatus) {
     if (!startAttr) return fallbackStatus;
     const start = new Date(startAttr);
@@ -248,7 +275,9 @@
       const rows = table.querySelectorAll("tbody tr");
       let visibleCount = 0;
       rows.forEach((row) => {
-        const endAttr = row.getAttribute("data-end");
+        const endAttr = effectiveEndForFiltering(
+          row.getAttribute("data-end"), row.getAttribute("data-source")
+        );
         const show = !hasDefinitivelyEnded(endAttr) && (
           dayStart === null || overlapsDay(row.getAttribute("data-start"), endAttr, dayStart, dayEnd)
         );
@@ -299,7 +328,8 @@
       let total = 0;
       let active = 0;
       entries.forEach((c) => {
-        const show = !hasDefinitivelyEnded(c.end) && (dayStart === null || overlapsDay(c.start, c.end, dayStart, dayEnd));
+        const effectiveEnd = effectiveEndForFiltering(c.end, c.source);
+        const show = !hasDefinitivelyEnded(effectiveEnd) && (dayStart === null || overlapsDay(c.start, effectiveEnd, dayStart, dayEnd));
         if (show) {
           total++;
           const effectiveStatus = c.source === TRAFFIC_SCOTLAND_SOURCE_LABEL
@@ -341,6 +371,6 @@
   // actual site (no other file imports this), and `typeof module`
   // is undefined in a browser, so this is a no-op there.
   if (typeof module !== "undefined" && module.exports) {
-    module.exports = { overlapsDay, hasDefinitivelyEnded, liveStatusFor, buildDays, startOfDay };
+    module.exports = { overlapsDay, hasDefinitivelyEnded, liveStatusFor, effectiveEndForFiltering, buildDays, startOfDay };
   }
 })();
